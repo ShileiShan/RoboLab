@@ -30,8 +30,12 @@ from robolab.tasks.piper.piper_single_object_pick_place_task import PIPER_FINGER
 
 OBJECT_NAME = os.environ.get(OBJECT_NAME_ENV, "banana")
 OBJECT_NAMES = json.loads(os.environ.get(OBJECT_NAMES_ENV, f'["{OBJECT_NAME}"]'))
+TASK_OBJECT_NAMES = OBJECT_NAMES if len(OBJECT_NAMES) > 1 else [OBJECT_NAME]
 SCENE_PATH = os.environ.get(GENERATED_SCENE_ENV)
-INSTRUCTION = os.environ.get(INSTRUCTION_ENV, build_instruction(OBJECT_NAME))
+INSTRUCTION = os.environ.get(
+    INSTRUCTION_ENV,
+    build_instruction(OBJECT_NAME, all_objects=len(TASK_OBJECT_NAMES) > 1),
+)
 DROP_PLAN_RAW = os.environ.get(DYNAMIC_DROP_PLAN_ENV)
 DROP_PLAN = json.loads(DROP_PLAN_RAW) if DROP_PLAN_RAW else None
 EPISODE_LENGTH_S = float(os.environ.get(DYNAMIC_EPISODE_LENGTH_ENV, "20"))
@@ -51,13 +55,16 @@ class PiperDynamicPickAndPlaceTerminations:
     success = DoneTerm(
         func=object_moved_to_container,
         params={
-            "object": OBJECT_NAME,
+            # Generated scenes with multiple objects are all-object transfer
+            # tasks: every object must leave pick_box and reach place_box.
+            "object": TASK_OBJECT_NAMES,
             "target_container": "place_box",
             "source_container": "pick_box",
             "gripper_name": PIPER_FINGER_CONTACTS,
             "tolerance": 0.05,
             "require_contact_with": True,
             "require_gripper_detached": True,
+            "logical": "all",
         },
     )
 
@@ -78,7 +85,9 @@ class PiperDynamicPickPlaceEvents:
 class PiperDynamicPickPlaceTask(Task):
     task_name = "PiperDynamicPickPlaceTask"
     contact_object_list = [*OBJECT_NAMES, "pick_box", "place_box", "table"]
-    contact_sensor_body_object_list = [OBJECT_NAME]
+    # All-object transfer needs object↔container contact information for every
+    # generated body, not just the historical single target object.
+    contact_sensor_body_object_list = TASK_OBJECT_NAMES
     scene = import_scene(SCENE_PATH, contact_object_list)
     terminations = PiperDynamicPickAndPlaceTerminations
     # Defining task events replaces the generic BaseEventCfg, so the event
@@ -92,13 +101,13 @@ class PiperDynamicPickPlaceTask(Task):
 
     subtasks = [
         Subtask(
-            name="pick_and_place",
+            name="pick_and_place_all_objects" if len(TASK_OBJECT_NAMES) > 1 else "pick_and_place",
             conditions={
-                OBJECT_NAME: [
+                object_name: [
                     (
                         partial(
                             object_grabbed,
-                            object=OBJECT_NAME,
+                            object=object_name,
                             gripper_name=PIPER_FINGER_CONTACTS,
                         ),
                         0.0,
@@ -106,7 +115,7 @@ class PiperDynamicPickPlaceTask(Task):
                     (
                         partial(
                             object_outside_of,
-                            object=OBJECT_NAME,
+                            object=object_name,
                             container="pick_box",
                             gripper_name=PIPER_FINGER_CONTACTS,
                         ),
@@ -115,7 +124,7 @@ class PiperDynamicPickPlaceTask(Task):
                     (
                         partial(
                             object_moved_to_container,
-                            object=OBJECT_NAME,
+                            object=object_name,
                             target_container="place_box",
                             source_container="pick_box",
                             require_contact_with=False,
@@ -125,6 +134,7 @@ class PiperDynamicPickPlaceTask(Task):
                         1.0,
                     ),
                 ]
+                for object_name in TASK_OBJECT_NAMES
             },
             logical="all",
             score=1.0,

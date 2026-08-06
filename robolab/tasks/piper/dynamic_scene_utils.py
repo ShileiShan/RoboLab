@@ -188,7 +188,17 @@ def sample_dynamic_objects(
     return target_spec, distractor_specs
 
 
-def build_instruction(object_name: str) -> str:
+def build_instruction(object_name: str, *, all_objects: bool = False) -> str:
+    """Build the default language instruction for a generated dynamic task.
+
+    A multi-object generated scene is a genuine all-object transfer task by
+    default, rather than a one-target task with unnamed distractors.  Callers
+    can still supply an explicit ``--dynamic-instruction`` to replace this
+    natural-language prompt; task success semantics remain determined by the
+    generated object count.
+    """
+    if all_objects:
+        return "Pick up all objects and place them in the box"
     return f"Pick up the {object_name.replace('_', ' ')} and place it in the box"
 
 
