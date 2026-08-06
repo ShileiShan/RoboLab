@@ -24,10 +24,14 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--policy", choices=PI0_VARIANTS, default="pi05",
                     help=("Which Pi0-family variant to evaluate (default: pi05). "
                           "Selects per-variant defaults inside Pi0PiperDualArmClient."))
+parser.add_argument("--rtc", action="store_true",
+                    help=("Use training-time action-conditioning RTC: execute server chunks locally "
+                          "and replan asynchronously. Defaults to port 8001."))
 parser.add_argument("--remote-host", "--remote_host", type=str, default="localhost",
                     help="Remote host for policy server (default: localhost).")
-parser.add_argument("--remote-port", "--remote_port", type=int, default=8000,
-                    help="Remote port for policy server (default: 8000).")
+parser.add_argument("--remote-port", "--remote_port", type=int, default=None,
+                    help=("Remote port for policy server. Defaults to 8000 normally, or 8001 "
+                          "with --rtc."))
 parser.add_argument("--remote-uri", "--remote_uri", type=str, default=None,
                     help=("Full WebSocket URI for policy server, e.g. wss://host.lepton.run. "
                           "Overrides --remote-host and --remote-port when set."))
@@ -35,6 +39,14 @@ parser.add_argument("--open-loop-horizon", "--open_loop_horizon", type=int, defa
                     help=("Number of actions to execute from each predicted chunk before "
                           "requesting a new one. If omitted, the client uses its per-variant "
                           "default. Must match the model's action_horizon for best performance."))
+parser.add_argument("--control-hz", "--control_hz", type=float, default=30.0,
+                    help="RTC action execution frequency in Hz (only used with --rtc; default: 30).")
+parser.add_argument("--rtc-execution-horizon", "--rtc_execution_horizon", type=int, default=10,
+                    help=("Actions executed from each RTC chunk before starting the next background "
+                          "replan (only used with --rtc; default: 10)."))
+parser.add_argument("--rtc-inference-delay-steps", "--rtc_inference_delay_steps", type=int, default=5,
+                    help=("Committed model-space prefix length sent to the training-time RTC server "
+                          "(only used with --rtc; default: 5)."))
 parser.add_argument("--enable-verbose", "--enable_verbose", action="store_true",
                     help="Verbose output (default: False).")
 parser.add_argument("--enable-debug", "--enable_debug", action="store_true",
@@ -122,22 +134,22 @@ parser.add_argument("--dynamic-record-setup-video", "--dynamic_record_setup_vide
                     help=("With --dynamic-sequential-drop, prepend the reset-time drop/settle process "
                           "to the same dashboard MP4 as the policy episode. Default: start video only "
                           "after all objects are settled."))
-parser.add_argument("--dynamic-settle-steps", "--dynamic_settle_steps", type=int, default=300,
-                    help="All-at-once dynamic settle step count (default: 300).")
+parser.add_argument("--dynamic-settle-steps", "--dynamic_settle_steps", type=int, default=600,
+                    help="All-at-once dynamic settle step count (default: 600).")
 parser.add_argument("--dynamic-settle-steps-per-object", "--dynamic_settle_steps_per_object",
-                    type=int, default=120,
+                    type=int, default=240,
                     help=("Maximum runtime physics steps to wait for stability after each sequential "
-                          "release (default: 120)."))
-parser.add_argument("--dynamic-settle-final-steps", "--dynamic_settle_final_steps", type=int, default=120,
-                    help="Minimum extra runtime settle steps after the final sequential release (default: 120).")
-parser.add_argument("--dynamic-settle-max-steps", "--dynamic_settle_max_steps", type=int, default=600,
-                    help="Maximum additional runtime settle steps while waiting for final stability (default: 600).")
+                          "release (default: 240)."))
+parser.add_argument("--dynamic-settle-final-steps", "--dynamic_settle_final_steps", type=int, default=240,
+                    help="Minimum extra runtime settle steps after the final sequential release (default: 240).")
+parser.add_argument("--dynamic-settle-max-steps", "--dynamic_settle_max_steps", type=int, default=1200,
+                    help="Maximum additional runtime settle steps while waiting for final stability (default: 1200).")
 parser.add_argument("--dynamic-stable-linear-velocity", "--dynamic_stable_linear_velocity", type=float, default=0.02,
                     help="Linear-speed threshold in m/s used by runtime sequential settling (default: 0.02).")
 parser.add_argument("--dynamic-stable-angular-velocity", "--dynamic_stable_angular_velocity", type=float, default=0.2,
                     help="Angular-speed threshold in rad/s used by runtime sequential settling (default: 0.2).")
-parser.add_argument("--dynamic-stable-frames", "--dynamic_stable_frames", type=int, default=15,
-                    help="Consecutive quiet physics frames required for runtime sequential settling (default: 15).")
+parser.add_argument("--dynamic-stable-frames", "--dynamic_stable_frames", type=int, default=30,
+                    help="Consecutive quiet physics frames required for runtime sequential settling (default: 30).")
 
 from robolab.constants import DEFAULT_TASK_SUBFOLDERS, PACKAGE_DIR  # noqa: E402
 from robolab.eval.runner import add_common_eval_args, run_evaluation  # noqa: E402
@@ -186,7 +198,7 @@ from robolab.tasks.piper.dynamic_scene_utils import (  # noqa: E402
     settle_scene_in_place,
 )
 
-from policies.pi0_family.piper_client import Pi0PiperDualArmClient  # noqa: E402
+from policies.pi0_family.piper_client import Pi0PiperDualArmClient, Pi0RTCPiperDualArmClient  # noqa: E402
 
 robolab.constants.ENABLE_SUBTASK_PROGRESS_CHECKING = args_cli.enable_subtask
 robolab.constants.RECORD_IMAGE_DATA = args_cli.record_image_data
@@ -280,7 +292,10 @@ if dynamic_requested:
             "skipping offline --settle-dynamic-scene.\033[0m"
         )
 
-    instruction = args_cli.dynamic_instruction or build_instruction(object_name)
+    instruction = args_cli.dynamic_instruction or build_instruction(
+        object_name,
+        all_objects=len(object_names) > 1,
+    )
     export_dynamic_env(
         scene_path,
         object_name,
@@ -315,14 +330,27 @@ auto_register_piper_envs(
 )
 
 
-def make_client(args: argparse.Namespace) -> Pi0PiperDualArmClient:
+def make_client(args: argparse.Namespace) -> Pi0PiperDualArmClient | Pi0RTCPiperDualArmClient:
+    if args.rtc:
+        kwargs = dict(
+            remote_host=args.remote_host,
+            remote_uri=args.remote_uri,
+            control_hz=args.control_hz,
+            execution_horizon=args.rtc_execution_horizon,
+            inference_delay_steps=args.rtc_inference_delay_steps,
+        )
+        if args.remote_port is not None:
+            kwargs["remote_port"] = args.remote_port
+        return Pi0RTCPiperDualArmClient(**kwargs)
+
     kwargs = dict(
         remote_host=args.remote_host,
-        remote_port=args.remote_port,
         remote_uri=args.remote_uri,
         open_loop_horizon=args.open_loop_horizon,
         policy_variant=args.policy,
     )
+    if args.remote_port is not None:
+        kwargs["remote_port"] = args.remote_port
     return Pi0PiperDualArmClient(**{k: v for k, v in kwargs.items() if v is not None})
 
 
