@@ -1155,6 +1155,27 @@
     "difficulty_label": "simple"
   },
   {
+    "task_name": "MakeBreakfastTask",
+    "instruction": "Put the two bread slices into the toaster, then place the toasted bread slices onto the plate.",
+    "instruction_variants": {
+      "default": "Put the two bread slices into the toaster, then place the toasted bread slices onto the plate.",
+      "vague": "Make breakfast.",
+      "specific": "Pick up each of the two bread slices and insert them into the toaster on the table, then take the two slices out of the toaster and place them onto the plate."
+    },
+    "episode_s": "120",
+    "scene": "breakfast.usda",
+    "filename": "benchmark/make_breakfast_task.py",
+    "contact_objects": "mianbaopian_0_130, mianbaopian_0_131, mianbaojia_0_175, clay_plates, shuihu_0_186, shuibei_0_098, table",
+    "terminations": "MakeBreakfastTerminations",
+    "attributes": "conjunction, semantics",
+    "subtasks": "pick_and_place_on_surface(groups=['mianbaopian_0_130', 'mianbaopian_0_131'], logical=all) score=0.5; pick_and_place_on_surface(groups=['mianbaopian_0_130', 'mianbaopian_0_131'], logical=all) score=0.5",
+    "num_sequential_stages": 2,
+    "num_atomic_conditions": 8,
+    "num_subtasks": 4,
+    "difficulty_score": 4,
+    "difficulty_label": "moderate"
+  },
+  {
     "task_name": "MarkerInMugTask",
     "instruction": "Put the whiteboard marker in the mug",
     "instruction_variants": {
@@ -1489,6 +1510,40 @@
     "num_subtasks": 1,
     "difficulty_score": 3,
     "difficulty_label": "moderate"
+  },
+  {
+    "task_name": "PiperSingleBananaPickPlaceTask",
+    "instruction": "Pick up the banana and place it in the box",
+    "instruction_variants": null,
+    "episode_s": "20",
+    "scene": "piper_single_banana_pick_place.usda",
+    "filename": "piper/piper_single_banana_pick_place_task.py",
+    "contact_objects": "banana, pick_box, place_box, table",
+    "terminations": "PiperBananaPickAndPlaceTerminations",
+    "attributes": "",
+    "subtasks": "pick_and_place(groups=['banana'], logical=all) score=1.0",
+    "num_sequential_stages": 1,
+    "num_atomic_conditions": 3,
+    "num_subtasks": 1,
+    "difficulty_score": 1,
+    "difficulty_label": "simple"
+  },
+  {
+    "task_name": "PiperSingleObjectPickPlaceTask",
+    "instruction": "Pick up the rubiks cube and place it in the box",
+    "instruction_variants": null,
+    "episode_s": "20",
+    "scene": "piper_single_object_pick_place.usda",
+    "filename": "piper/piper_single_object_pick_place_task.py",
+    "contact_objects": "rubiks_cube, pick_box, place_box, table",
+    "terminations": "PiperPickAndPlaceTerminations",
+    "attributes": "",
+    "subtasks": "pick_and_place(groups=['rubiks_cube'], logical=all) score=1.0",
+    "num_sequential_stages": 1,
+    "num_atomic_conditions": 3,
+    "num_subtasks": 1,
+    "difficulty_score": 1,
+    "difficulty_label": "simple"
   },
   {
     "task_name": "PlasticBottlesInSquarePailTask",
