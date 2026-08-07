@@ -16,6 +16,7 @@ ${data}/
 **NOT_USED.py
 **OLD.py
 .venv
+.dashboard-venv/
 debug/*
 !debug/scripts/
 !debug/scripts/**
