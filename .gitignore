@@ -1,4 +1,7 @@
 __pycache__
+${data}/
+.cache/
+.claude/settings.json
 *.pyc
 .vscode/*
 *.egg-info/
