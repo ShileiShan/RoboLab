@@ -189,6 +189,7 @@ class _PendingRTCChunk:
     chunk_index: int
     prefix_model_actions: np.ndarray
     prefix_steps: int
+    ready_before_prefix_logged: bool = False
 
 
 @dataclass
@@ -202,6 +203,7 @@ class _RTCChunkState:
     pending: _PendingRTCChunk | None = None
     last_action: np.ndarray | None = None
     last_viz: np.ndarray | None = None
+    executed_actions: int = 0
 
 
 class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
@@ -231,6 +233,8 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
         control_hz: float = DEFAULT_CONTROL_HZ,
         execution_horizon: int = DEFAULT_EXECUTION_HORIZON,
         inference_delay_steps: int = DEFAULT_INFERENCE_DELAY_STEPS,
+        rtc_debug: bool = False,
+        rtc_debug_action_interval: int = 10,
     ) -> None:
         if control_hz <= 0:
             raise ValueError(f"control_hz must be positive, got {control_hz}")
@@ -242,6 +246,11 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
             raise ValueError(
                 "inference_delay_steps must not exceed execution_horizon, got "
                 f"{inference_delay_steps} > {execution_horizon}"
+            )
+        if rtc_debug_action_interval <= 0:
+            raise ValueError(
+                "rtc_debug_action_interval must be positive, got "
+                f"{rtc_debug_action_interval}"
             )
 
         # Reuse the established OpenPI transport and reconnect behavior.  The
@@ -261,10 +270,19 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
         self._last_control_start: float | None = None
         self._last_server_timing: dict | None = None
         self._rtc_states: dict[int, _RTCChunkState] = {}
+        self.rtc_debug = bool(rtc_debug)
+        self.rtc_debug_action_interval = int(rtc_debug_action_interval)
         # A WebsocketClientPolicy connection is not safe for overlapping infer
         # calls.  RTC is intentionally single-env; one worker hides inference
         # latency without concurrent use of that connection.
         self._replan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pi0-rtc-replan")
+        self._debug(
+            "config: "
+            f"remote={self._display} control_hz={self.control_hz:g} "
+            f"execution_horizon={self.execution_horizon} "
+            f"inference_delay_steps={self.inference_delay_steps} "
+            f"action_debug_interval={self.rtc_debug_action_interval}"
+        )
 
     def infer(self, obs: Any, instruction: str, *, env_id: int = 0) -> dict:
         """Return the next buffered action without blocking on a replan."""
@@ -283,6 +301,12 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
             state = self._make_chunk_state(response)
             state.last_viz = self._build_visualization(extracted)
             self._rtc_states[env_id] = state
+            self._debug(
+                "initial chunk: "
+                f"env={env_id} robot_shape={state.robot_actions.shape} "
+                f"model_shape={state.model_actions.shape} "
+                f"server_timing={self._format_server_timing(self._last_server_timing)}"
+            )
             # The initial request may take far longer than one control period.
             # Start rate limiting from when its first action is actually ready.
             self._last_control_start = time.monotonic()
@@ -297,7 +321,11 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
             state.last_viz = self._build_visualization(extracted)
             self._start_replan(state, extracted, instruction)
 
+        selected_index = state.next_index
+        previous_action = state.last_action
         action = self._next_buffered_action(state)
+        state.executed_actions += 1
+        self._debug_action(state, selected_index, previous_action, action)
         return {"action": action, "viz": state.last_viz}
 
     def infer_batch(self, obs: Any, instruction: str, *, env_ids: list[int]) -> dict[int, dict]:
@@ -344,8 +372,10 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
     def _make_chunk_state(self, response: dict) -> _RTCChunkState:
         robot_actions, model_actions = self._unpack_chunk_response(response)
         self._last_server_timing = response.get("server_timing")
+        postprocessed_robot_actions = self._postprocess_chunk(robot_actions)
+        self._debug_response_chunks("initial response", robot_actions, model_actions, postprocessed_robot_actions)
         return _RTCChunkState(
-            robot_actions=self._postprocess_chunk(robot_actions),
+            robot_actions=postprocessed_robot_actions,
             model_actions=model_actions,
         )
 
@@ -374,10 +404,33 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
             prefix_model_actions=leftover[:prefix_steps].copy(),
             prefix_steps=prefix_steps,
         )
+        self._debug(
+            "replan request: "
+            f"global_step={state.executed_actions} chunk={state.chunk_index} "
+            f"start_index={start_index} leftover_shape={leftover.shape} "
+            f"prefix_steps={prefix_steps} "
+            f"leftover={self._array_summary(leftover)}"
+        )
 
     def _collect_ready_replan(self, state: _RTCChunkState) -> None:
         pending = state.pending
         if pending is None or not pending.future.done():
+            return
+
+        # Paper RTC hard-conditions the new chunk's first ``prefix_steps`` to
+        # the old leftover prefix.  If inference returns earlier than that,
+        # keep executing the old chunk until the conditioned prefix has really
+        # been consumed, then switch to the same index in the new chunk.
+        elapsed = max(0, state.next_index - pending.start_index)
+        if elapsed < pending.prefix_steps:
+            if not pending.ready_before_prefix_logged:
+                pending.ready_before_prefix_logged = True
+                self._debug(
+                    "replan ready early: "
+                    f"global_step={state.executed_actions} chunk={pending.chunk_index} "
+                    f"elapsed={elapsed} prefix_steps={pending.prefix_steps}; "
+                    "continuing old chunk until the hard-conditioned prefix is consumed"
+                )
             return
 
         state.pending = None
@@ -390,6 +443,7 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
 
         self._last_server_timing = response.get("server_timing")
         response_prefix = model_actions[:pending.prefix_steps]
+        model_prefix_max_abs = float(np.max(np.abs(response_prefix - pending.prefix_model_actions)))
         if not np.allclose(response_prefix, pending.prefix_model_actions, rtol=1e-4, atol=1e-5):
             logger.warning(
                 "[%s] RTC response prefix differs from the hard-conditioned prefix; "
@@ -400,14 +454,41 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
         # The service's returned chunk starts at the request's first leftover
         # action.  Actions executed while the worker ran are already in the
         # past, so drop exactly that elapsed prefix before switching chunks.
-        elapsed = max(0, state.next_index - pending.start_index)
         if elapsed >= len(robot_actions):
             raise RuntimeError(
                 "RTC replan arrived after its entire action chunk had expired; "
                 "increase the chunk horizon or reduce inference latency."
             )
 
-        state.robot_actions = self._postprocess_chunk(robot_actions)
+        postprocessed_robot_actions = self._postprocess_chunk(robot_actions)
+        self._debug_response_chunks(
+            f"replan response chunk={pending.chunk_index + 1}",
+            robot_actions,
+            model_actions,
+            postprocessed_robot_actions,
+        )
+        old_robot_prefix = state.robot_actions[
+            pending.start_index : pending.start_index + pending.prefix_steps
+        ]
+        robot_prefix_max_abs = float(
+            np.max(np.abs(postprocessed_robot_actions[:pending.prefix_steps] - old_robot_prefix))
+        )
+        seam_max_abs = (
+            float(np.max(np.abs(postprocessed_robot_actions[elapsed] - state.last_action)))
+            if state.last_action is not None
+            else float("nan")
+        )
+        self._debug(
+            "replan switch: "
+            f"global_step={state.executed_actions} old_chunk={pending.chunk_index} "
+            f"new_chunk={pending.chunk_index + 1} elapsed={elapsed} "
+            f"model_prefix_max_abs={model_prefix_max_abs:.6g} "
+            f"robot_prefix_max_abs={robot_prefix_max_abs:.6g} "
+            f"seam_max_abs={seam_max_abs:.6g} "
+            f"server_timing={self._format_server_timing(self._last_server_timing)}"
+        )
+
+        state.robot_actions = postprocessed_robot_actions
         state.model_actions = model_actions
         state.next_index = elapsed
         state.chunk_index = pending.chunk_index + 1
@@ -428,6 +509,143 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
         state.next_index += 1
         return state.last_action
 
+    def _debug_action(
+        self,
+        state: _RTCChunkState,
+        selected_index: int,
+        previous_action: np.ndarray | None,
+        action: np.ndarray,
+    ) -> None:
+        """Emit sparse action diagnostics without changing control behavior."""
+        if not self.rtc_debug or state.executed_actions % self.rtc_debug_action_interval:
+            return
+        delta = float(np.max(np.abs(action - previous_action))) if previous_action is not None else float("nan")
+        self._debug(
+            "action: "
+            f"global_step={state.executed_actions} chunk={state.chunk_index} "
+            f"local_index={selected_index} max_delta={delta:.6g} "
+            f"arms={self._format_vector(action[:12])} "
+            f"grippers_m={self._format_vector(action[12:])}"
+        )
+
+    def _debug(self, message: str) -> None:
+        if self.rtc_debug:
+            print(f"[Pi0RTC] {message}", flush=True)
+
+    @staticmethod
+    def _format_vector(values: np.ndarray, *, precision: int = 4) -> str:
+        return np.array2string(np.asarray(values), precision=precision, suppress_small=True)
+
+    @staticmethod
+    def _array_summary(values: np.ndarray) -> str:
+        array = np.asarray(values)
+        if array.size == 0:
+            return f"shape={array.shape} dtype={array.dtype} empty"
+        finite = array[np.isfinite(array)]
+        if finite.size == 0:
+            return f"shape={array.shape} dtype={array.dtype} all_nonfinite"
+        return (
+            f"shape={array.shape} dtype={array.dtype} "
+            f"min={float(np.min(finite)):.6g} max={float(np.max(finite)):.6g} "
+            f"mean={float(np.mean(finite)):.6g} std={float(np.std(finite)):.6g}"
+        )
+
+    def _debug_rtc_request(self, request: dict, *, request_kind: str) -> None:
+        if not self.rtc_debug:
+            return
+
+        images = request.get("images", {})
+        image_summaries = ", ".join(
+            f"{name}:shape={np.asarray(image).shape},dtype={np.asarray(image).dtype}"
+            for name, image in sorted(images.items())
+        )
+        self._debug(
+            "request: "
+            f"kind={request_kind} "
+            f"state_summary={self._array_summary(request['state'])} "
+            f"state_values={self._format_vector(request['state'])} "
+            f"gripper_position={self._format_vector(request['gripper_position'])} "
+            f"prompt={request.get('prompt')!r} "
+            f"images=[{image_summaries}]"
+        )
+
+        prev_leftover = request.get("_paper_rtc_prev_leftover_model")
+        if prev_leftover is not None:
+            self._debug(
+                "request rtc conditioning: "
+                f"client_step={request.get('_paper_rtc_client_step')} "
+                f"local_chunk_index={request.get('_paper_rtc_local_chunk_index')} "
+                f"prefix_steps={request.get('_paper_rtc_inference_delay_steps')} "
+                f"attention_horizon={request.get('_paper_rtc_prefix_attention_horizon')} "
+                f"prev_leftover={self._array_summary(prev_leftover)} "
+                f"prefix_first={self._format_vector(prev_leftover[0])} "
+                f"prefix_last={self._format_vector(prev_leftover[request['_paper_rtc_inference_delay_steps'] - 1])}"
+            )
+
+    def _debug_response_chunks(
+        self,
+        label: str,
+        raw_robot_actions: np.ndarray,
+        model_actions: np.ndarray,
+        env_robot_actions: np.ndarray,
+    ) -> None:
+        if not self.rtc_debug:
+            return
+
+        self._debug(
+            f"{label}: "
+            f"raw_robot={self._array_summary(raw_robot_actions)} "
+            f"model={self._array_summary(model_actions)} "
+            f"env_robot={self._array_summary(env_robot_actions)}"
+        )
+        self._debug(
+            f"{label} samples: "
+            f"raw_first={self._format_vector(raw_robot_actions[0])} "
+            f"raw_exec_horizon={self._format_vector(raw_robot_actions[self.execution_horizon])} "
+            f"raw_last={self._format_vector(raw_robot_actions[-1])}"
+        )
+        self._debug(
+            f"{label} postprocess: "
+            f"env_first={self._format_vector(env_robot_actions[0])} "
+            f"env_exec_horizon={self._format_vector(env_robot_actions[self.execution_horizon])} "
+            f"env_last={self._format_vector(env_robot_actions[-1])}"
+        )
+        self._debug(
+            f"{label} grippers: "
+            f"raw_left_dim6_norm_range=({float(np.min(raw_robot_actions[:, 6])):.6g},"
+            f"{float(np.max(raw_robot_actions[:, 6])):.6g}) "
+            f"raw_right_dim13_norm_range=({float(np.min(raw_robot_actions[:, 13])):.6g},"
+            f"{float(np.max(raw_robot_actions[:, 13])):.6g}) "
+            f"env_left_m_range=({float(np.min(env_robot_actions[:, 12])):.6g},"
+            f"{float(np.max(env_robot_actions[:, 12])):.6g}) "
+            f"env_right_m_range=({float(np.min(env_robot_actions[:, 13])):.6g},"
+            f"{float(np.max(env_robot_actions[:, 13])):.6g})"
+        )
+
+    @staticmethod
+    def _format_server_timing(server_timing: dict | None) -> str:
+        """Return a compact, stable timing summary for RTC debug output."""
+        if not server_timing:
+            return "none"
+        preferred_keys = (
+            "request_kind",
+            "conditioned_prefix_steps",
+            "prev_leftover_len",
+            "get_action_ms",
+            "model_inference_ms",
+            "infer_ms",
+            "prev_total_ms",
+            "server_recv_wait_ms",
+            "server_prepare_ms",
+            "server_pack_ms",
+        )
+        values = [
+            f"{key}={server_timing[key]}"
+            for key in preferred_keys
+            if key in server_timing
+        ]
+        return ",".join(values) if values else "keys=" + ",".join(sorted(server_timing))
+
     def _pack_rtc_request(
         self,
         extracted_obs: dict,
@@ -440,11 +658,6 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
     ) -> dict:
         """Pack the training-time action-conditioning RTC protocol."""
         request = super()._pack_request(extracted_obs, instruction)
-        request["images"] = {
-            "cam_top": self._resize_to_chw_uint8(extracted_obs["first_person_image"]),
-            "cam_left_wrist": self._resize_to_chw_uint8(extracted_obs["left_hand_image"]),
-            "cam_right_wrist": self._resize_to_chw_uint8(extracted_obs["right_hand_image"]),
-        }
         request["_paper_rtc_client_chunk_request"] = True
 
         if prev_leftover_model is not None:
@@ -464,6 +677,8 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
                     "_paper_rtc_local_chunk_index": local_chunk_index,
                 }
             )
+        request_kind = "replan" if prev_leftover_model is not None else "initial"
+        self._debug_rtc_request(request, request_kind=request_kind)
         return request
 
     def _unpack_chunk_response(self, response: dict) -> tuple[np.ndarray, np.ndarray]:

@@ -86,6 +86,11 @@ and conditions on five committed actions. Use `--remote-host`, `--remote-port`,
 asynchronous after the first chunk, so it does not block control ticks. This
 protocol uses one ordered WebSocket stream; run it with `--num-envs 1`.
 
+Add `--rtc-debug` to print every replan request, model/robot prefix alignment,
+elapsed actions at chunk switch, the action discontinuity at that switch, and
+a sparse action trace. Use `--rtc-debug-action-interval N` to control the
+action trace interval (default: 10).
+
 ## Variation scripts
 
 The pi0_family folder also ships controlled-variation runners that wrap the same client to sweep a single axis per registered env:

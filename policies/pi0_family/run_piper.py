@@ -16,6 +16,8 @@ import cv2  # noqa: F401 -- must import this before isaaclab. Do not remove
 from isaaclab.app import AppLauncher
 
 PI0_VARIANTS = ["pi0", "pi0_fast", "pi05", "paligemma", "paligemma_fast"]
+DEFAULT_REMOTE_PORT = 8000
+DEFAULT_RTC_REMOTE_PORT = 8001
 
 parser = argparse.ArgumentParser(
     description="Evaluate a Pi0-family policy backend on Piper tasks.",
@@ -26,12 +28,12 @@ parser.add_argument("--policy", choices=PI0_VARIANTS, default="pi05",
                           "Selects per-variant defaults inside Pi0PiperDualArmClient."))
 parser.add_argument("--rtc", action="store_true",
                     help=("Use training-time action-conditioning RTC: execute server chunks locally "
-                          "and replan asynchronously. Defaults to port 8001."))
+                          f"and replan asynchronously. Defaults to port {DEFAULT_RTC_REMOTE_PORT}."))
 parser.add_argument("--remote-host", "--remote_host", type=str, default="localhost",
                     help="Remote host for policy server (default: localhost).")
 parser.add_argument("--remote-port", "--remote_port", type=int, default=None,
-                    help=("Remote port for policy server. Defaults to 8000 normally, or 8001 "
-                          "with --rtc."))
+                    help=(f"Remote port for policy server. Defaults to {DEFAULT_REMOTE_PORT} normally, "
+                          f"or {DEFAULT_RTC_REMOTE_PORT} with --rtc."))
 parser.add_argument("--remote-uri", "--remote_uri", type=str, default=None,
                     help=("Full WebSocket URI for policy server, e.g. wss://host.lepton.run. "
                           "Overrides --remote-host and --remote-port when set."))
@@ -47,6 +49,12 @@ parser.add_argument("--rtc-execution-horizon", "--rtc_execution_horizon", type=i
 parser.add_argument("--rtc-inference-delay-steps", "--rtc_inference_delay_steps", type=int, default=5,
                     help=("Committed model-space prefix length sent to the training-time RTC server "
                           "(only used with --rtc; default: 5)."))
+parser.add_argument("--rtc-debug", "--rtc_debug", action="store_true",
+                    help=("Print RTC request, prefix-alignment, chunk-switch, and sparse action diagnostics "
+                          "(only used with --rtc)."))
+parser.add_argument("--rtc-debug-action-interval", "--rtc_debug_action_interval", type=int, default=10,
+                    help=("Print one RTC action diagnostic every N control actions with --rtc-debug "
+                          "(default: 10)."))
 parser.add_argument("--enable-verbose", "--enable_verbose", action="store_true",
                     help="Verbose output (default: False).")
 parser.add_argument("--enable-debug", "--enable_debug", action="store_true",
@@ -332,15 +340,19 @@ auto_register_piper_envs(
 
 def make_client(args: argparse.Namespace) -> Pi0PiperDualArmClient | Pi0RTCPiperDualArmClient:
     if args.rtc:
+        remote_port = args.remote_port if args.remote_port is not None else DEFAULT_RTC_REMOTE_PORT
+        remote_display = args.remote_uri if args.remote_uri is not None else f"{args.remote_host}:{remote_port}"
+        print(f"\033[96m[RoboLab] Pi0 Piper RTC endpoint: {remote_display}\033[0m")
         kwargs = dict(
             remote_host=args.remote_host,
+            remote_port=remote_port,
             remote_uri=args.remote_uri,
             control_hz=args.control_hz,
             execution_horizon=args.rtc_execution_horizon,
             inference_delay_steps=args.rtc_inference_delay_steps,
+            rtc_debug=args.rtc_debug,
+            rtc_debug_action_interval=args.rtc_debug_action_interval,
         )
-        if args.remote_port is not None:
-            kwargs["remote_port"] = args.remote_port
         return Pi0RTCPiperDualArmClient(**kwargs)
 
     kwargs = dict(
@@ -349,8 +361,7 @@ def make_client(args: argparse.Namespace) -> Pi0PiperDualArmClient | Pi0RTCPiper
         open_loop_horizon=args.open_loop_horizon,
         policy_variant=args.policy,
     )
-    if args.remote_port is not None:
-        kwargs["remote_port"] = args.remote_port
+    kwargs["remote_port"] = args.remote_port if args.remote_port is not None else DEFAULT_REMOTE_PORT
     return Pi0PiperDualArmClient(**{k: v for k, v in kwargs.items() if v is not None})
 
 
