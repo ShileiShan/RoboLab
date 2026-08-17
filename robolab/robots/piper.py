@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import math
 import os
 import re
 
@@ -22,6 +23,34 @@ from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransf
 from isaaclab.utils import configclass
 
 from robolab.constants import ROBOTS_DIR
+
+
+def _read_nonnegative_float_env(name: str, default: float) -> float:
+    """Read an optional actuator override supplied by a launch process.
+
+    The comparison launcher starts each parameter set in a fresh process, so
+    resolving these values during module import keeps a normal RoboLab run
+    unchanged while allowing a run-specific actuator configuration.
+    """
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a finite non-negative number, got {raw_value!r}.") from exc
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be a finite non-negative number, got {raw_value!r}.")
+    return value
+
+
+# These defaults are the checked-in Piper tuning.  The environment variables
+# are deliberately narrow in scope: they affect only the two arm actuators,
+# never the grippers, and only for the process that sets them.
+PIPER_ARM_KP = _read_nonnegative_float_env("ROBOLAB_PIPER_ARM_KP", 867.0147)
+PIPER_ARM_KD = _read_nonnegative_float_env("ROBOLAB_PIPER_ARM_KD", 127.7443)
+PIPER_ARM_ARMATURE = _read_nonnegative_float_env("ROBOLAB_PIPER_ARM_ARMATURE", 0.4855)
+PIPER_ARM_FRICTION = _read_nonnegative_float_env("ROBOLAB_PIPER_ARM_FRICTION", 0.3516)
 
 # Ported from Isaac Lab Arena's "Double Piper" embodiment
 # (isaaclab_arena/embodiments/double_piper/double_piper.py): two independent 6-DoF
@@ -102,6 +131,9 @@ class PiperCfg:
         prim_path="{ENV_REGEX_NS}/robot",
         spawn=sim_utils.UsdFileCfg(
             usd_path=os.path.join(ROBOTS_DIR, "double_piper.usd"),
+            # Inherited by both arms and grippers for the fixed comparison
+            # camera's robot-only semantic mask.
+            semantic_tags=[("class", "robot")],
             activate_contact_sensors=True,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
@@ -145,15 +177,19 @@ class PiperCfg:
                 joint_names_expr=["joint[1-6]_l"],
                 effort_limit=50.0,
                 velocity_limit=20.0,
-                stiffness=400.0,
-                damping=80.0,
+                stiffness=PIPER_ARM_KP,
+                damping=PIPER_ARM_KD,
+                armature=PIPER_ARM_ARMATURE,
+                friction=PIPER_ARM_FRICTION,
             ),
             "right_arm": ImplicitActuatorCfg(
                 joint_names_expr=["joint[1-6]_r"],
                 effort_limit=50.0,
                 velocity_limit=20.0,
-                stiffness=400.0,
-                damping=80.0,
+                stiffness=PIPER_ARM_KP,
+                damping=PIPER_ARM_KD,
+                armature=PIPER_ARM_ARMATURE,
+                friction=PIPER_ARM_FRICTION,
             ),
             "left_gripper": ImplicitActuatorCfg(
                 joint_names_expr=["finger_joint.*_l"],

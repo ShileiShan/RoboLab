@@ -170,3 +170,32 @@ class EgocentricMirroredCameraCfg:
         convention="opengl"
     ),
 )
+
+
+@configclass
+class PiperComparisonCameraCfg:
+    """Fixed wide external camera used by Piper actuator comparisons."""
+
+    piper_comparison_camera = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/piper_comparison_camera",
+        height=720,
+        width=1280,
+        # RGB and semantic IDs share a render product, so masks are exactly
+        # pixel-aligned with the comparison video.
+        data_types=["rgb", "semantic_segmentation"],
+        colorize_semantic_segmentation=False,
+        semantic_filter=["class"],
+        spawn=sim_utils.PinholeCameraCfg(
+            # Wider than the historic viewport: keeps both arms and the
+            # breakfast workspace visible throughout the trace.
+            focal_length=14.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            vertical_aperture=15.29,
+        ),
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(1.8, 0.0, 1.15),
+            rot=(0.653, 0.271, 0.271, 0.653),
+            convention="opengl",
+        ),
+    )

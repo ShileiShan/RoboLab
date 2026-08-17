@@ -188,7 +188,7 @@ if livestream_kit_args:
 # add_common_eval_args defaults --task-dirs to the benchmark folder; the Piper
 # task lives under robolab/tasks/piper instead, so retarget it unless the
 # caller explicitly overrode --task-dirs.
-if args_cli.task_dirs == DEFAULT_TASK_SUBFOLDERS:
+if args_cli.task is None and args_cli.task_dirs == DEFAULT_TASK_SUBFOLDERS:
     args_cli.task_dirs = ["piper"]
 
 app_launcher = AppLauncher(args_cli)
@@ -335,6 +335,7 @@ auto_register_piper_envs(
     task=registration_task,
     randomize_background=args_cli.randomize_background,
     background_seed=args_cli.background_seed,
+    enable_comparison_camera=os.environ.get("ROBOLAB_ENABLE_COMPARISON_CAMERA", "1") != "0",
 )
 
 

@@ -5,7 +5,8 @@ import robolab.constants
 
 
 def auto_register_piper_envs(task_dirs=("piper",), lighting_intensity=None, task=None, cameras=None,
-                              randomize_background=False, background_seed=None):
+                              randomize_background=False, background_seed=None,
+                              enable_comparison_camera=True):
     """Automatically discover and register piper (dual-arm) tasks.
 
     Mirrors ``robolab.registrations.droid.auto_env_registrations_jointpos.auto_register_droid_envs``,
@@ -23,6 +24,9 @@ def auto_register_piper_envs(task_dirs=("piper",), lighting_intensity=None, task
               (excluding the default home_office background).
         background_seed: Seed for reproducible per-task background sampling. Ignored if
               ``randomize_background`` is False.
+        enable_comparison_camera: Add the fixed RGB + semantic camera used by
+              actuator-comparison video output. Disable it for policy trace
+              recording, where it consumes VRAM but is never read.
     """
     import random
 
@@ -40,14 +44,18 @@ def auto_register_piper_envs(task_dirs=("piper",), lighting_intensity=None, task
         contact_gripper,
     )
     from robolab.variations.backgrounds import HomeOfficeBackgroundCfg
-    from robolab.variations.camera import EgocentricMirroredCameraCfg
+    from robolab.variations.camera import PiperComparisonCameraCfg
     from robolab.variations.lighting import SphereLightCfg
 
     if cameras is None:
         cameras = ALL
 
     ImageObsCfg = generate_image_obs_from_cameras(cameras)
-    ViewportCameraCfg = generate_image_obs_from_cameras([EgocentricMirroredCameraCfg])
+    comparison_camera_cfgs = [PiperComparisonCameraCfg] if enable_comparison_camera else []
+    ViewportCameraCfg = generate_image_obs_from_cameras(
+        comparison_camera_cfgs,
+        data_types=("rgb", "semantic_segmentation"),
+    ) if comparison_camera_cfgs else generate_image_obs_from_cameras([])
 
     ObservationCfg = generate_obs_cfg({
         "image_obs": ImageObsCfg(),
@@ -90,7 +98,7 @@ def auto_register_piper_envs(task_dirs=("piper",), lighting_intensity=None, task
         observations_cfg=ObservationCfg(),
         actions_cfg=PiperAbsoluteJointPositionActionCfg(),
         robot_cfg=PiperCfg,
-        camera_cfg=[*scene_cameras, EgocentricMirroredCameraCfg],
+        camera_cfg=[*scene_cameras, *comparison_camera_cfgs],
         lighting_cfg=SphereLightCfg,
         background_cfg=background_cfg,
         contact_gripper=contact_gripper,

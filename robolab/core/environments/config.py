@@ -12,6 +12,7 @@ This module provides functions for:
 """
 
 import logging
+import os
 from typing import Any, Type
 
 import gymnasium as gym
@@ -128,7 +129,25 @@ def generate_task_env_cfg(task_class: Task,
         def __post_init__(self):
             super().__post_init__()  # Set all defaults first
 
-            self.episode_length_s: int = task_class.episode_length_s
+            # Allow launch scripts to override a task's configured duration without
+            # modifying the task source. This is opt-in so normal task registration
+            # continues to use its declared episode length.
+            episode_length_override = os.environ.get("ROBOLAB_EPISODE_LENGTH_S")
+            if episode_length_override is None:
+                self.episode_length_s = task_class.episode_length_s
+            else:
+                try:
+                    self.episode_length_s = float(episode_length_override)
+                except ValueError as exc:
+                    raise ValueError(
+                        "ROBOLAB_EPISODE_LENGTH_S must be a positive number, "
+                        f"got {episode_length_override!r}."
+                    ) from exc
+                if self.episode_length_s <= 0:
+                    raise ValueError(
+                        "ROBOLAB_EPISODE_LENGTH_S must be a positive number, "
+                        f"got {episode_length_override!r}."
+                    )
             self.decimation: int = decimation
             self.sim.dt: int = dt
             self.sim.render_interval: int = render_interval

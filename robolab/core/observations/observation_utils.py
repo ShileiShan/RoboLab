@@ -29,7 +29,10 @@ def _image_observation_func():
     return image_func
 
 
-def generate_image_obs_from_cameras(camera_cfgs: List[Any] | Any):
+def generate_image_obs_from_cameras(
+    camera_cfgs: List[Any] | Any,
+    data_types: tuple[str, ...] = ("rgb",),
+):
     """
     Dynamically create an image observation group configuration from one or more camera configs.
 
@@ -52,6 +55,8 @@ def generate_image_obs_from_cameras(camera_cfgs: List[Any] | Any):
 
     Args:
         camera_cfgs: List of camera configuration classes (e.g., [EgocentricWideAngleCameraCfg, ...])
+        data_types: Camera outputs to expose. ``rgb`` retains the historical
+            term name; additional outputs receive a ``_<data_type>`` suffix.
 
     Returns:
         A dynamically generated observation group configuration class (ObsGroup)
@@ -75,14 +80,22 @@ def generate_image_obs_from_cameras(camera_cfgs: List[Any] | Any):
                 if isinstance(attr_value, CameraCfg):
                 # if hasattr(attr_value, 'prim_path'):
                     camera_name = attr_name
-                    obs_terms[camera_name] = ObsTerm(
-                        func=_image_observation_func(),
-                        params={
-                            "sensor_cfg": SceneEntityCfg(camera_name),
-                            "data_type": "rgb",
-                            "normalize": False,
-                        }
-                    )
+                    configured_data_types = set(getattr(attr_value, "data_types", ()))
+                    for data_type in data_types:
+                        if data_type not in configured_data_types:
+                            raise ValueError(
+                                f"Camera {camera_name!r} does not provide requested "
+                                f"data type {data_type!r}."
+                            )
+                        term_name = camera_name if data_type == "rgb" else f"{camera_name}_{data_type}"
+                        obs_terms[term_name] = ObsTerm(
+                            func=_image_observation_func(),
+                            params={
+                                "sensor_cfg": SceneEntityCfg(camera_name),
+                                "data_type": data_type,
+                                "normalize": False,
+                            }
+                        )
 
     # Create the dynamic image observation group class
     @configclass
