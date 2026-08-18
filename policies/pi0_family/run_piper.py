@@ -55,6 +55,12 @@ parser.add_argument("--rtc-debug", "--rtc_debug", action="store_true",
 parser.add_argument("--rtc-debug-action-interval", "--rtc_debug_action_interval", type=int, default=10,
                     help=("Print one RTC action diagnostic every N control actions with --rtc-debug "
                           "(default: 10)."))
+parser.add_argument("--piper-action-filter-ema", "--piper_action_filter_ema",
+                    dest="piper_action_filter_ema", action="store_true", default=True,
+                    help="Enable EMA in the Piper real-robot-style action filter (default: on).")
+parser.add_argument("--disable-piper-action-filter-ema", "--disable_piper_action_filter_ema",
+                    dest="piper_action_filter_ema", action="store_false",
+                    help="Disable EMA while keeping Piper max_delta action limits enabled.")
 parser.add_argument("--enable-verbose", "--enable_verbose", action="store_true",
                     help="Verbose output (default: False).")
 parser.add_argument("--enable-debug", "--enable_debug", action="store_true",
@@ -207,6 +213,7 @@ from robolab.tasks.piper.dynamic_scene_utils import (  # noqa: E402
 )
 
 from policies.pi0_family.piper_client import Pi0PiperDualArmClient, Pi0RTCPiperDualArmClient  # noqa: E402
+from robolab.eval.piper_action_filter import PiperActionFilterClient, PiperActionFilterConfig  # noqa: E402
 
 robolab.constants.ENABLE_SUBTASK_PROGRESS_CHECKING = args_cli.enable_subtask
 robolab.constants.RECORD_IMAGE_DATA = args_cli.record_image_data
@@ -339,7 +346,7 @@ auto_register_piper_envs(
 )
 
 
-def make_client(args: argparse.Namespace) -> Pi0PiperDualArmClient | Pi0RTCPiperDualArmClient:
+def make_client(args: argparse.Namespace) -> PiperActionFilterClient:
     if args.rtc:
         remote_port = args.remote_port if args.remote_port is not None else DEFAULT_RTC_REMOTE_PORT
         remote_display = args.remote_uri if args.remote_uri is not None else f"{args.remote_host}:{remote_port}"
@@ -354,16 +361,26 @@ def make_client(args: argparse.Namespace) -> Pi0PiperDualArmClient | Pi0RTCPiper
             rtc_debug=args.rtc_debug,
             rtc_debug_action_interval=args.rtc_debug_action_interval,
         )
-        return Pi0RTCPiperDualArmClient(**kwargs)
+        client = Pi0RTCPiperDualArmClient(**kwargs)
+    else:
+        kwargs = dict(
+            remote_host=args.remote_host,
+            remote_uri=args.remote_uri,
+            open_loop_horizon=args.open_loop_horizon,
+            policy_variant=args.policy,
+        )
+        kwargs["remote_port"] = args.remote_port if args.remote_port is not None else DEFAULT_REMOTE_PORT
+        client = Pi0PiperDualArmClient(**{k: v for k, v in kwargs.items() if v is not None})
 
-    kwargs = dict(
-        remote_host=args.remote_host,
-        remote_uri=args.remote_uri,
-        open_loop_horizon=args.open_loop_horizon,
-        policy_variant=args.policy,
+    filter_config = PiperActionFilterConfig(use_ema=args.piper_action_filter_ema)
+    print(
+        "\033[96m[RoboLab] Piper action filter: "
+        f"EMA={'on' if filter_config.use_ema else 'off'}, "
+        f"alpha={filter_config.alpha:g}, joint_max_delta={filter_config.max_joint_delta:g}, "
+        f"gripper_max_delta={filter_config.max_gripper_delta:g}, "
+        f"gripper_opening={filter_config.max_gripper_opening:g}\033[0m"
     )
-    kwargs["remote_port"] = args.remote_port if args.remote_port is not None else DEFAULT_REMOTE_PORT
-    return Pi0PiperDualArmClient(**{k: v for k, v in kwargs.items() if v is not None})
+    return PiperActionFilterClient(client, config=filter_config, action_format="env")
 
 
 def main() -> None:

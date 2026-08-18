@@ -19,6 +19,27 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument("--action-trace", type=str, required=True,
                     help="Path to a .npz trace created by extract_piper_action_trace.py.")
+parser.add_argument("--piper-action-format", "--piper_action_format",
+                    choices=["auto", "env", "model"], default="auto",
+                    help=("Action trace format. 'env' is RoboLab order "
+                          "[left_arm, right_arm, left_gripper_m, right_gripper_m]; "
+                          "'model' is raw server/real-robot order "
+                          "[left_arm, left_gripper_norm, right_arm, right_gripper_norm]. "
+                          "Default: auto."))
+parser.add_argument("--enable-piper-action-filter", "--enable_piper_action_filter",
+                    dest="piper_action_filter", action="store_true", default=None,
+                    help=("Force-enable Piper action filtering during replay. By default, replay filters "
+                          "raw model/server traces and does not re-filter RoboLab HDF5 env traces."))
+parser.add_argument("--disable-piper-action-filter", "--disable_piper_action_filter",
+                    dest="piper_action_filter", action="store_false",
+                    help=("Disable Piper action filtering during replay, still converting "
+                          "model-format actions to env format."))
+parser.add_argument("--piper-action-filter-ema", "--piper_action_filter_ema",
+                    dest="piper_action_filter_ema", action="store_true", default=True,
+                    help="Enable EMA in the Piper real-robot-style action filter (default: on).")
+parser.add_argument("--disable-piper-action-filter-ema", "--disable_piper_action_filter_ema",
+                    dest="piper_action_filter_ema", action="store_false",
+                    help="Disable EMA while keeping Piper max_delta action limits enabled.")
 parser.add_argument("--enable-verbose", "--enable_verbose", action="store_true")
 parser.add_argument("--enable-debug", "--enable_debug", action="store_true")
 
@@ -58,6 +79,11 @@ simulation_app = app_launcher.app
 
 import robolab.constants  # noqa: E402
 from robolab.eval.action_replay import ActionReplayClient  # noqa: E402
+from robolab.eval.piper_action_filter import (  # noqa: E402
+    PiperActionFilterClient,
+    PiperActionFilterConfig,
+    infer_piper_action_format,
+)
 from robolab.registrations.piper.auto_env_registrations_jointpos import auto_register_piper_envs  # noqa: E402
 
 robolab.constants.ENABLE_SUBTASK_PROGRESS_CHECKING = args_cli.enable_subtask
@@ -70,9 +96,28 @@ if args_cli.task is None and args_cli.task_dirs == DEFAULT_TASK_SUBFOLDERS:
 auto_register_piper_envs(task_dirs=args_cli.task_dirs, task=args_cli.task)
 
 
-def make_client(args: argparse.Namespace) -> ActionReplayClient:
-    del args
-    return ActionReplayClient(trace)
+def make_client(args: argparse.Namespace) -> PiperActionFilterClient:
+    action_format = (
+        infer_piper_action_format(trace.actions, source_hdf5=trace.source_hdf5)
+        if args.piper_action_format == "auto"
+        else args.piper_action_format
+    )
+    filter_enabled = args.piper_action_filter if args.piper_action_filter is not None else action_format == "model"
+    filter_config = PiperActionFilterConfig(use_ema=args.piper_action_filter_ema)
+    print(
+        "\033[96m[RoboLab] Piper action replay format/filter: "
+        f"format={action_format}, filter={'on' if filter_enabled else 'off'}, "
+        f"EMA={'on' if filter_config.use_ema else 'off'}, "
+        f"alpha={filter_config.alpha:g}, joint_max_delta={filter_config.max_joint_delta:g}, "
+        f"gripper_max_delta={filter_config.max_gripper_delta:g}, "
+        f"gripper_opening={filter_config.max_gripper_opening:g}\033[0m"
+    )
+    return PiperActionFilterClient(
+        ActionReplayClient(trace),
+        config=filter_config,
+        action_format=action_format,
+        enabled=filter_enabled,
+    )
 
 
 def main() -> None:
