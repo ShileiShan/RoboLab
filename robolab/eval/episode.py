@@ -121,7 +121,17 @@ from robolab.core.world.world_state import get_world
 from robolab.eval.base_client import InferenceClient
 
 
-def run_episode(env, env_cfg, episode, client: InferenceClient, *, headless=False, save_videos=True, video_mode="all"):
+def run_episode(
+    env,
+    env_cfg,
+    episode,
+    client: InferenceClient,
+    *,
+    headless=False,
+    save_videos=True,
+    video_mode="all",
+    sensor_video_camera: str | None = None,
+):
     """Run a policy-controlled episode across all parallel envs.
 
     The policy client is constructed by the caller (typically a per-policy
@@ -137,6 +147,8 @@ def run_episode(env, env_cfg, episode, client: InferenceClient, *, headless=Fals
         headless: If True, don't display video
         save_videos: If True, save per-env episode videos
         video_mode: Which videos to save: 'all', 'viewport', 'sensor', or 'none'
+        sensor_video_camera: Optional image_obs camera key to record instead of
+            the concatenated sensor camera strip.
 
     Returns:
         tuple: (env_results, subtask_status, timing)
@@ -195,7 +207,8 @@ def run_episode(env, env_cfg, episode, client: InferenceClient, *, headless=Fals
         for env_id in range(env.num_envs):
             suffix = f"_{episode}_env{env_id}" if env.num_envs > 1 else f"_{episode}"
             if save_sensor:
-                video_path = os.path.join(get_output_dir(), f"{cleaned_instruction}{suffix}.mp4")
+                camera_suffix = f"_{sensor_video_camera}" if sensor_video_camera else ""
+                video_path = os.path.join(get_output_dir(), f"{cleaned_instruction}{suffix}{camera_suffix}.mp4")
                 video_writers_obs.append(VideoWriter(video_path, video_fps))
             if save_viewport:
                 video_path_viewport = os.path.join(get_output_dir(), f"{cleaned_instruction}{suffix}_viewport.mp4")
@@ -304,7 +317,12 @@ def run_episode(env, env_cfg, episode, client: InferenceClient, *, headless=Fals
             if skip_frozen and env._frozen_envs[env_id]:
                 continue
             if save_sensor:
-                sensor_frame = unpack_image_obs(frame_obs, scale=0.5, env_id=env_id).get("combined_image")
+                sensor_images = unpack_image_obs(frame_obs, scale=0.5, env_id=env_id)
+                sensor_frame = (
+                    sensor_images[sensor_video_camera]
+                    if sensor_video_camera
+                    else sensor_images["combined_image"]
+                )
                 video_writers_obs[env_id].write(sensor_frame)
             if save_viewport:
                 viewport_frame = unpack_viewport_cams(frame_obs, env_id=env_id).get("combined_image")

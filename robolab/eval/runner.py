@@ -91,6 +91,10 @@ def add_common_eval_args(parser: argparse.ArgumentParser) -> None:
                         choices=["all", "viewport", "sensor", "none"],
                         help=("Which videos to save: 'all' (sensor + viewport), "
                               "'viewport' only, 'sensor' only, or 'none' (default: all)."))
+    parser.add_argument("--sensor-video-camera", "--sensor_video_camera", type=str, default=None,
+                        help=("When saving sensor videos, record only this image_obs camera "
+                              "(for Piper, use first_person_camera to match real cam_high). "
+                              "Default: concatenate all sensor cameras."))
     parser.add_argument("--renderer", type=str, default="realtime",
                         choices=["realtime", "pathtracing"],
                         help=("RTX renderer mode (default: realtime). 'realtime' uses "
@@ -102,11 +106,10 @@ def add_common_eval_args(parser: argparse.ArgumentParser) -> None:
     # AppLauncher.add_app_launcher_args() reserves the dest `rendering_mode` on some
     # versions (e.g. 2.2.0 in the OSMO eval image) and raises if the parser already
     # defines it. Using a distinct dest avoids that collision regardless of arg order.
-    parser.add_argument("--rendering-type", "--rendering_type", type=str, default=None,
+    parser.add_argument("--rendering-type", "--rendering_type", type=str, default="performance",
                         choices=["performance", "balanced", "quality"],
                         help=("Realtime renderer quality preset (maps to IsaacLab "
-                              "RenderCfg.rendering_mode). Default: unset, which lets "
-                              "IsaacLab fall back to 'balanced'. No effect under "
+                              "RenderCfg.rendering_mode). Default: performance. No effect under "
                               "--renderer pathtracing."))
 
 
@@ -259,6 +262,7 @@ def run_evaluation(
                 client=client,
                 save_videos=save_videos,
                 video_mode=args.video_mode,
+                sensor_video_camera=args.sensor_video_camera,
                 headless=args.headless,
             )
 
