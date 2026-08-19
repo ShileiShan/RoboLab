@@ -76,10 +76,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-video", type=Path, required=True)
     parser.add_argument("--baseline-mask-video", type=Path)
     parser.add_argument("--candidate-mask-video", type=Path)
-    parser.add_argument("--baseline-breakfast-objects-mask-video", type=Path,
-                        help="Optional binary mask containing the MakeBreakfast bread slices and toaster.")
-    parser.add_argument("--candidate-breakfast-objects-mask-video", type=Path,
-                        help="Optional binary mask containing the MakeBreakfast bread slices and toaster.")
+    parser.add_argument("--baseline-object-mask-video", "--baseline-breakfast-objects-mask-video",
+                        dest="baseline_object_mask_video", type=Path,
+                        help="Optional binary mask for tracked comparison objects (e.g. kettle/cup or bread/toaster).")
+    parser.add_argument("--candidate-object-mask-video", "--candidate-breakfast-objects-mask-video",
+                        dest="candidate_object_mask_video", type=Path,
+                        help="Optional binary mask for tracked comparison objects (e.g. kettle/cup or bread/toaster).")
     parser.add_argument("--frames", type=int, default=8,
                         help="Number of equally spaced contact-sheet frames (default: 8).")
     parser.add_argument("--output", type=Path, required=True, help="Contact-sheet PNG output.")
@@ -196,10 +198,10 @@ def main() -> None:
         raise ValueError("Initial-frame thresholds must be non-negative; IoU must be in [0, 1].")
     if bool(args.baseline_mask_video) != bool(args.candidate_mask_video):
         raise ValueError("Provide both robot mask videos or neither.")
-    if bool(args.baseline_breakfast_objects_mask_video) != bool(args.candidate_breakfast_objects_mask_video):
-        raise ValueError("Provide both breakfast-object mask videos or neither.")
-    if args.baseline_breakfast_objects_mask_video and not args.baseline_mask_video:
-        raise ValueError("Breakfast-object masks require both robot mask videos.")
+    if bool(args.baseline_object_mask_video) != bool(args.candidate_object_mask_video):
+        raise ValueError("Provide both tracked-object mask videos or neither.")
+    if args.baseline_object_mask_video and not args.baseline_mask_video:
+        raise ValueError("Tracked-object masks require both robot mask videos.")
     if args.layout == "overlay" and not args.baseline_mask_video:
         raise ValueError("--layout overlay requires both robot mask videos.")
     if args.layout == "overlay" and args.overlay_video is None:
@@ -210,12 +212,12 @@ def main() -> None:
     baseline_mask_reader = VideoReader(args.baseline_mask_video) if args.baseline_mask_video else None
     candidate_mask_reader = VideoReader(args.candidate_mask_video) if args.candidate_mask_video else None
     baseline_breakfast_mask_reader = (
-        VideoReader(args.baseline_breakfast_objects_mask_video)
-        if args.baseline_breakfast_objects_mask_video else None
+        VideoReader(args.baseline_object_mask_video)
+        if args.baseline_object_mask_video else None
     )
     candidate_breakfast_mask_reader = (
-        VideoReader(args.candidate_breakfast_objects_mask_video)
-        if args.candidate_breakfast_objects_mask_video else None
+        VideoReader(args.candidate_object_mask_video)
+        if args.candidate_object_mask_video else None
     )
     try:
         readers = [baseline_reader, candidate_reader]
@@ -328,7 +330,7 @@ def main() -> None:
             frame = resize_frame(samples[index], args.max_frame_width)
             timestamp_s = index / fps
             if args.layout == "overlay":
-                compared = "robot + breakfast objects" if baseline_breakfast_mask_reader else "robot"
+                compared = "robot + tracked objects" if baseline_breakfast_mask_reader else "robot"
                 caption = f"{args.baseline_label} (blue) + {args.candidate_label} (orange): {compared}"
                 tile = add_header(frame, caption, (150, 150, 150))
             else:
@@ -346,13 +348,13 @@ def main() -> None:
             "candidate_video": str(args.candidate_video),
             "baseline_mask_video": str(args.baseline_mask_video) if args.baseline_mask_video else None,
             "candidate_mask_video": str(args.candidate_mask_video) if args.candidate_mask_video else None,
-            "baseline_breakfast_objects_mask_video": (
-                str(args.baseline_breakfast_objects_mask_video)
-                if args.baseline_breakfast_objects_mask_video else None
+            "baseline_object_mask_video": (
+                str(args.baseline_object_mask_video)
+                if args.baseline_object_mask_video else None
             ),
-            "candidate_breakfast_objects_mask_video": (
-                str(args.candidate_breakfast_objects_mask_video)
-                if args.candidate_breakfast_objects_mask_video else None
+            "candidate_object_mask_video": (
+                str(args.candidate_object_mask_video)
+                if args.candidate_object_mask_video else None
             ),
             "overlay_video": str(args.overlay_video) if args.overlay_video else None,
             "static_background": str(background_path) if background is not None else None,
@@ -364,11 +366,11 @@ def main() -> None:
             "timestamps_s": [round(index / fps, 6) for index in sample_indices],
             "initial_frame_rgb_mae": round(initial_mae, 6),
             "initial_robot_mask_iou": round(initial_iou, 6) if initial_iou is not None else None,
-            "initial_breakfast_objects_mask_iou": (
+            "initial_object_mask_iou": (
                 round(initial_breakfast_iou, 6) if initial_breakfast_iou is not None else None
             ),
             "robot_masks_used": bool(args.baseline_mask_video),
-            "breakfast_objects_masks_used": bool(args.baseline_breakfast_objects_mask_video),
+            "object_masks_used": bool(args.baseline_object_mask_video),
         }
         manifest_path = args.output.with_suffix(".json")
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
