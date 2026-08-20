@@ -222,7 +222,7 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
 
     DEFAULT_CONTROL_HZ: float = 30.0
     DEFAULT_EXECUTION_HORIZON: int = 10
-    DEFAULT_INFERENCE_DELAY_STEPS: int = 5
+    DEFAULT_INFERENCE_DELAY_STEPS: int = 2
     MODEL_ACTION_DIM: int = 32
 
     def __init__(

@@ -70,7 +70,7 @@ server. It executes a full server chunk locally at 30 Hz, then launches a
 background replan after ten actions. The replan sends the latest three camera
 images, 12 arm joints, two normalized gripper states, the instruction, and the
 unexecuted **32-D model-space** portion of the old chunk. The server uses a
-five-action hard-conditioned prefix and returns paired `(50, 14)` robot-space
+two-action hard-conditioned prefix and returns paired `(50, 14)` robot-space
 and `(50, 32)` model-space chunks. The robot action order is
 `[left_arm(6), left_gripper, right_arm(6), right_gripper]`.
 
@@ -80,7 +80,7 @@ uv run python policies/pi0_family/run_piper.py \
 ```
 
 RTC defaults to `localhost:8001`, controls at 30 Hz, replans every ten actions,
-and conditions on five committed actions. Use `--remote-host`, `--remote-port`,
+and conditions on two committed actions. Use `--remote-host`, `--remote-port`,
 `--remote-uri`, `--control-hz`, `--rtc-execution-horizon`, or
 `--rtc-inference-delay-steps` to override those settings. Inference is
 asynchronous after the first chunk, so it does not block control ticks. This

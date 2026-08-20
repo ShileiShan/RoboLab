@@ -46,9 +46,9 @@ parser.add_argument("--control-hz", "--control_hz", type=float, default=30.0,
 parser.add_argument("--rtc-execution-horizon", "--rtc_execution_horizon", type=int, default=10,
                     help=("Actions executed from each RTC chunk before starting the next background "
                           "replan (only used with --rtc; default: 10)."))
-parser.add_argument("--rtc-inference-delay-steps", "--rtc_inference_delay_steps", type=int, default=5,
+parser.add_argument("--rtc-inference-delay-steps", "--rtc_inference_delay_steps", type=int, default=2,
                     help=("Committed model-space prefix length sent to the training-time RTC server "
-                          "(only used with --rtc; default: 5)."))
+                          "(only used with --rtc; default: 2)."))
 parser.add_argument("--rtc-debug", "--rtc_debug", action="store_true",
                     help=("Print RTC request, prefix-alignment, chunk-switch, and sparse action diagnostics "
                           "(only used with --rtc)."))
