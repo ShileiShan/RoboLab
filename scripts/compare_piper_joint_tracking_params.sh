@@ -7,14 +7,14 @@ readonly DEFAULT_CONTAINER="robolab_lh"
 readonly DEFAULT_TASK="MakeBreakfastTask"
 readonly DEFAULT_DEVICE="cuda:0"
 
-baseline_friction=0.10
-baseline_armature=0.05
 baseline_kp=400
 baseline_kd=80
-candidate_friction=0.3516
-candidate_armature=0.4855
+baseline_armature=0.05
+baseline_friction=0.10
 candidate_kp=867.0147
 candidate_kd=127.7443
+candidate_armature=0.4855
+candidate_friction=0.3516
 
 container="$DEFAULT_CONTAINER"
 task="$DEFAULT_TASK"
@@ -37,14 +37,14 @@ Required:
   --real-hdf5 FILE              Raw real-robot HDF5 episode with observations/qpos.
 
 Actuator options:
-  --baseline-friction VALUE     Baseline joint friction (default: 0.10)
-  --baseline-armature VALUE     Baseline armature (default: 0.05)
   --baseline-kp VALUE           Baseline stiffness / Kp (default: 400)
   --baseline-kd VALUE           Baseline damping / Kd (default: 80)
-  --candidate-friction VALUE    Candidate joint friction (default: 0.3516)
-  --candidate-armature VALUE    Candidate armature (default: 0.4855)
+  --baseline-armature VALUE     Baseline armature (default: 0.05)
+  --baseline-friction VALUE     Baseline friction (default: 0.10)
   --candidate-kp VALUE          Candidate stiffness / Kp (default: 867.0147)
   --candidate-kd VALUE          Candidate damping / Kd (default: 127.7443)
+  --candidate-armature VALUE    Candidate armature (default: 0.4855)
+  --candidate-friction VALUE    Candidate friction (default: 0.3516)
 
 Other options:
   --task NAME                   Piper-compatible task class (default: MakeBreakfastTask)
@@ -62,14 +62,14 @@ need_value() { (($# >= 2)) || { echo "Missing value for $1." >&2; exit 2; }; }
 while (($#)); do
   case "$1" in
     --real-hdf5) need_value "$@"; real_hdf5="$2"; shift 2 ;;
-    --baseline-friction) need_value "$@"; baseline_friction="$2"; shift 2 ;;
-    --baseline-armature) need_value "$@"; baseline_armature="$2"; shift 2 ;;
     --baseline-kp) need_value "$@"; baseline_kp="$2"; shift 2 ;;
     --baseline-kd) need_value "$@"; baseline_kd="$2"; shift 2 ;;
-    --candidate-friction) need_value "$@"; candidate_friction="$2"; shift 2 ;;
-    --candidate-armature) need_value "$@"; candidate_armature="$2"; shift 2 ;;
+    --baseline-armature) need_value "$@"; baseline_armature="$2"; shift 2 ;;
+    --baseline-friction) need_value "$@"; baseline_friction="$2"; shift 2 ;;
     --candidate-kp) need_value "$@"; candidate_kp="$2"; shift 2 ;;
     --candidate-kd) need_value "$@"; candidate_kd="$2"; shift 2 ;;
+    --candidate-armature) need_value "$@"; candidate_armature="$2"; shift 2 ;;
+    --candidate-friction) need_value "$@"; candidate_friction="$2"; shift 2 ;;
     --task) need_value "$@"; task="$2"; shift 2 ;;
     --device) need_value "$@"; device="$2"; shift 2 ;;
     --container) need_value "$@"; container="$2"; shift 2 ;;
@@ -87,8 +87,9 @@ is_nonnegative_number() {
 
 [[ -n "$real_hdf5" ]] || { echo "--real-hdf5 is required." >&2; exit 2; }
 [[ "$device" =~ ^cuda:([0-9]+)$ ]] || { echo "--device must be like cuda:0." >&2; exit 2; }
-for value in "$baseline_friction" "$baseline_armature" "$baseline_kp" "$baseline_kd" \
-             "$candidate_friction" "$candidate_armature" "$candidate_kp" "$candidate_kd"; do
+for value in \
+  "$baseline_kp" "$baseline_kd" "$baseline_armature" "$baseline_friction" \
+  "$candidate_kp" "$candidate_kd" "$candidate_armature" "$candidate_friction"; do
   is_nonnegative_number "$value" || { echo "Actuator values must be non-negative numbers: $value" >&2; exit 2; }
 done
 [[ "$lead_sim_steps" =~ ^[0-9]+$ ]] || { echo "--lead-sim-steps must be a non-negative integer." >&2; exit 2; }
@@ -139,14 +140,14 @@ case "$trace_host_path" in
 esac
 
 launch_replay() {
-  local label="$1" run_id="$2" friction="$3" armature="$4" kp="$5" kd="$6"
+  local label="$1" run_id="$2" kp="$3" kd="$4" armature="$5" friction="$6"
   local log_file="${comparison_dir}/${label}.log"
   echo "[RoboLab] Starting ${label} replay; log: ${log_file}"
   docker exec -i \
-    -e "ROBOLAB_PIPER_ARM_FRICTION=${friction}" \
-    -e "ROBOLAB_PIPER_ARM_ARMATURE=${armature}" \
     -e "ROBOLAB_PIPER_ARM_KP=${kp}" \
     -e "ROBOLAB_PIPER_ARM_KD=${kd}" \
+    -e "ROBOLAB_PIPER_ARM_ARMATURE=${armature}" \
+    -e "ROBOLAB_PIPER_ARM_FRICTION=${friction}" \
     "$container" \
     bash -lc '
       set -euo pipefail
@@ -160,8 +161,8 @@ launch_replay() {
     >"$log_file" 2>&1
 }
 
-launch_replay baseline "$baseline_run_id" "$baseline_friction" "$baseline_armature" "$baseline_kp" "$baseline_kd"
-launch_replay candidate "$candidate_run_id" "$candidate_friction" "$candidate_armature" "$candidate_kp" "$candidate_kd"
+launch_replay baseline "$baseline_run_id" "$baseline_kp" "$baseline_kd" "$baseline_armature" "$baseline_friction"
+launch_replay candidate "$candidate_run_id" "$candidate_kp" "$candidate_kd" "$candidate_armature" "$candidate_friction"
 
 find_single_file() {
   local dir="$1" pattern="$2" description="$3"
@@ -226,8 +227,8 @@ python3 analysis/build_piper_joint_tracking_report.py \
   --candidate-timeseries "$candidate_presentation_timeseries" \
   --baseline-video "$(basename "$baseline_presentation_video")" \
   --candidate-video "$(basename "$candidate_presentation_video")" \
-  --baseline-label "Baseline (f=${baseline_friction}, a=${baseline_armature}, kp=${baseline_kp}, kd=${baseline_kd})" \
-  --candidate-label "Candidate (f=${candidate_friction}, a=${candidate_armature}, kp=${candidate_kp}, kd=${candidate_kd})" \
+  --baseline-label "Baseline (friction=${baseline_friction}, armature=${baseline_armature}, kp=${baseline_kp}, kd=${baseline_kd})" \
+  --candidate-label "Candidate (friction=${candidate_friction}, armature=${candidate_armature}, kp=${candidate_kp}, kd=${candidate_kd})" \
   --left-arm-plot "$(basename "$left_arm_plot")" \
   --right-arm-plot "$(basename "$right_arm_plot")" \
   --gripper-plot "$(basename "$gripper_plot")" \

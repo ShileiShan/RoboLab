@@ -5,9 +5,11 @@ from dataclasses import dataclass
 from functools import partial
 
 import isaaclab.envs.mdp as mdp
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
+from robolab.core.events.reset_breakfast_toaster import reset_breakfast_scene_jointed_assets
 from robolab.core.scenes.utils import import_scene
 from robolab.core.task.conditionals import object_on_top
 from robolab.core.task.subtask import Subtask
@@ -17,9 +19,12 @@ from robolab.tasks.piper.piper_single_object_pick_place_task import PIPER_FINGER
 
 BREADS = ["mianbaopian_0_130", "mianbaopian_0_131"]
 TOASTER = "mianbaojia_0_175"
+TOASTER014 = "Toaster014"
 PLATE = "clay_plates"
 KETTLE = "shuihu_0_186"
 CUP = "shuibei_0_098"
+CONTACT_OBJECTS = BREADS + [TOASTER, PLATE, KETTLE, CUP, "table"]
+SCENE_OBJECTS = CONTACT_OBJECTS + [TOASTER014]
 
 
 @configclass
@@ -37,10 +42,17 @@ class MakeBreakfastTerminations:
     )
 
 
+@configclass
+class MakeBreakfastEvents:
+    reset_scene = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
+    reset_scene_jointed_assets = EventTerm(func=reset_breakfast_scene_jointed_assets, mode="reset")
+
+
 @dataclass
 class MakeBreakfastTask(Task):
-    contact_object_list = BREADS + [TOASTER, PLATE, KETTLE, CUP, "table"]
-    scene = import_scene("breakfast.usda", contact_object_list)
+    contact_object_list = CONTACT_OBJECTS
+    scene = import_scene("breakfast.usda", SCENE_OBJECTS)
+    events = MakeBreakfastEvents
     terminations = MakeBreakfastTerminations
     instruction = {
         "default": "Put the two bread slices into the toaster, then place the toasted bread slices onto the plate.",

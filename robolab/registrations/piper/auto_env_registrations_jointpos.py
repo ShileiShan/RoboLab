@@ -103,9 +103,9 @@ def auto_register_piper_envs(task_dirs=("piper",), lighting_intensity=None, task
         background_cfg=background_cfg,
         contact_gripper=contact_gripper,
         ee_body_name="hand_link_r",
-        dt=1 / (60 * 4),
+        dt=1 / (60 * 2),
         render_interval=8,
-        decimation=8,
+        decimation=4,
         seed=1,
     )
 

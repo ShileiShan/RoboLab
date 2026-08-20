@@ -75,9 +75,9 @@ _LEFT_HAND_CAM = TiledCameraCfg(
         clipping_range=(0.01, 1.0e5),
     ),
     offset=TiledCameraCfg.OffsetCfg(
-        pos=(-0.053, 0.0, 0.054),
-        # Arena records this offset as xyzw; IsaacLab Camera OffsetCfg expects wxyz.
-        rot=(-0.12279, -0.69636, 0.69636, 0.12279),
+        pos=(-0.072303, 0.010064, 0.048820),
+        # Calibrated wrist-camera extrinsics converted to IsaacLab's wxyz OpenGL convention.
+        rot=(-0.130998, -0.684807, 0.704612, 0.131911),
         convention="opengl",
     ),
 )
@@ -95,9 +95,9 @@ _RIGHT_HAND_CAM = TiledCameraCfg(
         clipping_range=(0.01, 1.0e5),
     ),
     offset=TiledCameraCfg.OffsetCfg(
-        pos=(-0.053, 0.0, 0.054),
-        # Arena records this offset as xyzw; IsaacLab Camera OffsetCfg expects wxyz.
-        rot=(-0.12279, -0.69636, 0.69636, 0.12279),
+        pos=(-0.071838, 0.011883, 0.048820),
+        # Calibrated wrist-camera extrinsics converted to IsaacLab's wxyz OpenGL convention.
+        rot=(0.136317, 0.703810, -0.686544, -0.121352),
         convention="opengl",
     ),
 )

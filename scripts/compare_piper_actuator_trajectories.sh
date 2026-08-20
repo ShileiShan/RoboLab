@@ -14,14 +14,10 @@ readonly DEFAULT_POLICY="pi05"
 readonly DEFAULT_DEVICE="cuda:0"
 
 # Values before the current Piper tuning landed.
-baseline_friction=0
-baseline_armature=0
 baseline_kp=400
 baseline_kd=80
 
 # Checked-in Piper tuning at the time this launcher was added.
-candidate_friction=0.3516
-candidate_armature=0.4855
 candidate_kp=867.0147
 candidate_kd=127.7443
 
@@ -44,12 +40,8 @@ Run an identical Piper policy evaluation for a baseline and a candidate actuator
 configuration, then write a synchronized viewport contact sheet under output/.
 
 Actuator options (applied identically to the left and right arm):
-  --baseline-friction VALUE     Baseline joint friction (default: 0)
-  --baseline-armature VALUE     Baseline armature (default: 0)
   --baseline-kp VALUE           Baseline stiffness / Kp (default: 400)
   --baseline-kd VALUE           Baseline damping / Kd (default: 80)
-  --candidate-friction VALUE    Candidate joint friction (default: 0.3516)
-  --candidate-armature VALUE    Candidate armature (default: 0.4855)
   --candidate-kp VALUE          Candidate stiffness / Kp (default: 867.0147)
   --candidate-kd VALUE          Candidate damping / Kd (default: 127.7443)
 
@@ -80,12 +72,8 @@ need_value() {
 
 while (($#)); do
   case "$1" in
-    --baseline-friction) need_value "$@"; baseline_friction="$2"; shift 2 ;;
-    --baseline-armature) need_value "$@"; baseline_armature="$2"; shift 2 ;;
     --baseline-kp) need_value "$@"; baseline_kp="$2"; shift 2 ;;
     --baseline-kd) need_value "$@"; baseline_kd="$2"; shift 2 ;;
-    --candidate-friction) need_value "$@"; candidate_friction="$2"; shift 2 ;;
-    --candidate-armature) need_value "$@"; candidate_armature="$2"; shift 2 ;;
     --candidate-kp) need_value "$@"; candidate_kp="$2"; shift 2 ;;
     --candidate-kd) need_value "$@"; candidate_kd="$2"; shift 2 ;;
     --frames) need_value "$@"; frames="$2"; shift 2 ;;
@@ -107,8 +95,7 @@ is_nonnegative_number() {
   [[ "$1" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] && awk -v value="$1" 'BEGIN { exit !(value >= 0) }'
 }
 
-for value in "$baseline_friction" "$baseline_armature" "$baseline_kp" "$baseline_kd" \
-             "$candidate_friction" "$candidate_armature" "$candidate_kp" "$candidate_kd"; do
+for value in "$baseline_kp" "$baseline_kd" "$candidate_kp" "$candidate_kd"; do
   is_nonnegative_number "$value" || { echo "Actuator values must be non-negative numbers: $value" >&2; exit 2; }
 done
 [[ "$frames" =~ ^[1-9][0-9]*$ ]] || { echo "--frames must be a positive integer." >&2; exit 2; }
@@ -137,8 +124,8 @@ print_config() {
   echo "[RoboLab] Piper actuator trajectory comparison"
   echo "[RoboLab] task=${task}, seconds=${seconds}, frames=${frames}, layout=${layout}"
   echo "[RoboLab] Isaac physics and renderer device=${device}"
-  echo "[RoboLab] baseline:  friction=${baseline_friction}, armature=${baseline_armature}, kp=${baseline_kp}, kd=${baseline_kd}"
-  echo "[RoboLab] candidate: friction=${candidate_friction}, armature=${candidate_armature}, kp=${candidate_kp}, kd=${candidate_kd}"
+  echo "[RoboLab] baseline:  kp=${baseline_kp}, kd=${baseline_kd}"
+  echo "[RoboLab] candidate: kp=${candidate_kp}, kd=${candidate_kd}"
   echo "[RoboLab] output: ${comparison_dir}"
 }
 
@@ -158,16 +145,12 @@ mkdir -p "$comparison_dir"
 launch_run() {
   local label="$1"
   local run_id="$2"
-  local friction="$3"
-  local armature="$4"
-  local kp="$5"
-  local kd="$6"
+  local kp="$3"
+  local kd="$4"
   local log_file="${comparison_dir}/${label}.log"
 
   echo "[RoboLab] Starting ${label} evaluation; log: ${log_file}"
   docker exec -i \
-    -e "ROBOLAB_PIPER_ARM_FRICTION=${friction}" \
-    -e "ROBOLAB_PIPER_ARM_ARMATURE=${armature}" \
     -e "ROBOLAB_PIPER_ARM_KP=${kp}" \
     -e "ROBOLAB_PIPER_ARM_KD=${kd}" \
     -e "ROBOLAB_EPISODE_LENGTH_S=${seconds}" \
@@ -185,8 +168,8 @@ launch_run() {
     >"$log_file" 2>&1
 }
 
-launch_run baseline "$baseline_run_id" "$baseline_friction" "$baseline_armature" "$baseline_kp" "$baseline_kd"
-launch_run candidate "$candidate_run_id" "$candidate_friction" "$candidate_armature" "$candidate_kp" "$candidate_kd"
+launch_run baseline "$baseline_run_id" "$baseline_kp" "$baseline_kd"
+launch_run candidate "$candidate_run_id" "$candidate_kp" "$candidate_kd"
 
 find_single_viewport_video() {
   local run_id="$1"
@@ -208,8 +191,8 @@ python3 analysis/visualize_piper_trajectory_comparison.py \
   --candidate-video "$candidate_video" \
   --frames "$frames" \
   --layout "$layout" \
-  --baseline-label "Baseline (f=${baseline_friction}, a=${baseline_armature}, kp=${baseline_kp}, kd=${baseline_kd})" \
-  --candidate-label "Candidate (f=${candidate_friction}, a=${candidate_armature}, kp=${candidate_kp}, kd=${candidate_kd})" \
+  --baseline-label "Baseline (kp=${baseline_kp}, kd=${baseline_kd})" \
+  --candidate-label "Candidate (kp=${candidate_kp}, kd=${candidate_kd})" \
   --output "$comparison_png"
 
 echo "[RoboLab] Baseline video: ${baseline_video}"
