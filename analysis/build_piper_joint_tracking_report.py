@@ -144,6 +144,15 @@ def _render_metadata(summary: dict, label: str) -> str:
             f"left [{gripper_min[0]:.6g}, {gripper_max[0]:.6g}] -> [0, 0.035] m; "
             f"right [{gripper_min[1]:.6g}, {gripper_max[1]:.6g}] -> [0, 0.035] m"
         )
+    param_rows = []
+    if "stiffness" in params:
+        param_rows.append(f"<tr><th>Stiffness</th><td>{params.get('stiffness')}</td></tr>")
+    if "damping" in params:
+        param_rows.append(f"<tr><th>Damping</th><td>{params.get('damping')}</td></tr>")
+    if "armature" in params:
+        param_rows.append(f"<tr><th>Armature</th><td>{params.get('armature')}</td></tr>")
+    if "friction" in params:
+        param_rows.append(f"<tr><th>Friction</th><td>{params.get('friction')}</td></tr>")
     return f"""
     <table class="meta-table">
       <caption>{html.escape(label)}</caption>
@@ -151,10 +160,7 @@ def _render_metadata(summary: dict, label: str) -> str:
       <tr><th>Source HDF5</th><td>{html.escape(str(summary.get('source_hdf5')))}</td></tr>
       <tr><th>Control Hz</th><td>{summary.get('control_hz')}</td></tr>
       <tr><th>Reference States</th><td>{summary.get('num_reference_states')}</td></tr>
-      <tr><th>Stiffness</th><td>{params.get('stiffness')}</td></tr>
-      <tr><th>Damping</th><td>{params.get('damping')}</td></tr>
-      <tr><th>Armature</th><td>{params.get('armature')}</td></tr>
-      <tr><th>Friction</th><td>{params.get('friction')}</td></tr>
+      {''.join(param_rows)}
       <tr><th>Gripper Mapping</th><td>{html.escape(mapping)}</td></tr>
     </table>
     """
