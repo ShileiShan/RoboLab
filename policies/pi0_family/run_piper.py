@@ -17,7 +17,7 @@ from isaaclab.app import AppLauncher
 
 PI0_VARIANTS = ["pi0", "pi0_fast", "pi05", "paligemma", "paligemma_fast"]
 DEFAULT_REMOTE_PORT = 8000
-DEFAULT_RTC_REMOTE_PORT = 8001
+DEFAULT_RTC_REMOTE_PORT = 8003
 
 parser = argparse.ArgumentParser(
     description="Evaluate a Pi0-family policy backend on Piper tasks.",
@@ -46,9 +46,9 @@ parser.add_argument("--control-hz", "--control_hz", type=float, default=30.0,
 parser.add_argument("--rtc-execution-horizon", "--rtc_execution_horizon", type=int, default=10,
                     help=("Actions executed from each RTC chunk before starting the next background "
                           "replan (only used with --rtc; default: 10)."))
-parser.add_argument("--rtc-inference-delay-steps", "--rtc_inference_delay_steps", type=int, default=2,
+parser.add_argument("--rtc-inference-delay-steps", "--rtc_inference_delay_steps", type=int, default=1,
                     help=("Committed model-space prefix length sent to the training-time RTC server "
-                          "(only used with --rtc; default: 2)."))
+                          "(only used with --rtc; default: 1)."))
 parser.add_argument("--rtc-debug", "--rtc_debug", action="store_true",
                     help=("Print RTC request, prefix-alignment, chunk-switch, and sparse action diagnostics "
                           "(only used with --rtc)."))
@@ -337,12 +337,19 @@ if dynamic_requested:
 else:
     registration_task = args_cli.task
 
+requested_video_mode = str(getattr(args_cli, "video_mode", "all") or "all").lower()
+comparison_camera_requested = requested_video_mode in ("all", "viewport")
+comparison_camera_forced = (
+    comparison_camera_requested
+    or os.environ.get("ROBOLAB_ENABLE_COMPARISON_CAMERA", "0") != "0"
+)
+
 auto_register_piper_envs(
     task_dirs=args_cli.task_dirs,
     task=registration_task,
     randomize_background=args_cli.randomize_background,
     background_seed=args_cli.background_seed,
-    enable_comparison_camera=os.environ.get("ROBOLAB_ENABLE_COMPARISON_CAMERA", "1") != "0",
+    enable_comparison_camera=comparison_camera_forced,
 )
 
 
@@ -378,6 +385,7 @@ def make_client(args: argparse.Namespace) -> PiperActionFilterClient:
         f"EMA={'on' if filter_config.use_ema else 'off'}, "
         f"alpha={filter_config.alpha:g}, joint_max_delta={filter_config.max_joint_delta:g}, "
         f"gripper_max_delta={filter_config.max_gripper_delta:g}, "
+        f"gripper_scale={filter_config.model_gripper_scale:g}, "
         f"gripper_opening={filter_config.max_gripper_opening:g}\033[0m"
     )
     return PiperActionFilterClient(client, config=filter_config, action_format="env")

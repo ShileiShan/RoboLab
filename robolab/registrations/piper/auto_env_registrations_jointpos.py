@@ -6,7 +6,7 @@ import robolab.constants
 
 def auto_register_piper_envs(task_dirs=("piper",), lighting_intensity=None, task=None, cameras=None,
                               randomize_background=False, background_seed=None,
-                              enable_comparison_camera=True):
+                              enable_comparison_camera=False):
     """Automatically discover and register piper (dual-arm) tasks.
 
     Mirrors ``robolab.registrations.droid.auto_env_registrations_jointpos.auto_register_droid_envs``,

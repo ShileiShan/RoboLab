@@ -110,6 +110,7 @@ def make_client(args: argparse.Namespace) -> PiperActionFilterClient:
         f"EMA={'on' if filter_config.use_ema else 'off'}, "
         f"alpha={filter_config.alpha:g}, joint_max_delta={filter_config.max_joint_delta:g}, "
         f"gripper_max_delta={filter_config.max_gripper_delta:g}, "
+        f"gripper_scale={filter_config.model_gripper_scale:g}, "
         f"gripper_opening={filter_config.max_gripper_opening:g}\033[0m"
     )
     return PiperActionFilterClient(

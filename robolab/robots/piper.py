@@ -116,7 +116,7 @@ _FIRST_PERSON_CAM = TiledCameraCfg(
     ),
     offset=TiledCameraCfg.OffsetCfg(
         pos=(-0.02, 0.33, 0.8),
-        # Arena records this offset as xyzw; IsaacLab Camera OffsetCfg expects wxyz.
+        # Local first-person camera extrinsics in IsaacLab's wxyz convention.
         rot=(0.6861, 0.17106, -0.17106, -0.6861),
         convention="opengl",
     ),
@@ -193,17 +193,17 @@ class PiperCfg:
             ),
             "left_gripper": ImplicitActuatorCfg(
                 joint_names_expr=["finger_joint.*_l"],
-                effort_limit=500.0,
+                effort_limit=50.0,
                 velocity_limit=0.5,
-                stiffness=5000.0,
-                damping=200.0,
+                stiffness=1000.0,
+                damping=100.0,
             ),
             "right_gripper": ImplicitActuatorCfg(
                 joint_names_expr=["finger_joint.*_r"],
-                effort_limit=500.0,
+                effort_limit=50.0,
                 velocity_limit=0.5,
-                stiffness=5000.0,
-                damping=200.0,
+                stiffness=1000.0,
+                damping=100.0,
             ),
         },
     )

@@ -25,6 +25,7 @@ class PiperActionFilterConfig:
     alpha: float = 0.6
     max_joint_delta: float = 0.15
     max_gripper_delta: float = 0.0167
+    model_gripper_scale: float = 0.035
     max_gripper_opening: float = 0.035
 
     def __post_init__(self) -> None:
@@ -34,11 +35,18 @@ class PiperActionFilterConfig:
             raise ValueError(f"max_joint_delta must be positive, got {self.max_joint_delta!r}")
         if self.max_gripper_delta <= 0:
             raise ValueError(f"max_gripper_delta must be positive, got {self.max_gripper_delta!r}")
+        if self.model_gripper_scale <= 0:
+            raise ValueError(f"model_gripper_scale must be positive, got {self.model_gripper_scale!r}")
         if self.max_gripper_opening <= 0:
             raise ValueError(f"max_gripper_opening must be positive, got {self.max_gripper_opening!r}")
 
 
-def model_action_to_env_action(action: np.ndarray, *, max_gripper_opening: float = 0.035) -> np.ndarray:
+def model_action_to_env_action(
+    action: np.ndarray,
+    *,
+    model_gripper_scale: float = 0.035,
+    max_gripper_opening: float = 0.035,
+) -> np.ndarray:
     """Convert Piper model/server order to RoboLab env order and gripper units."""
     action = np.asarray(action, dtype=np.float32)
     if action.shape[-1] != 14:
@@ -47,8 +55,8 @@ def model_action_to_env_action(action: np.ndarray, *, max_gripper_opening: float
     env_action = np.empty_like(action)
     env_action[..., 0:6] = action[..., 0:6]
     env_action[..., 6:12] = action[..., 7:13]
-    env_action[..., 12] = np.clip(action[..., 6], 0.0, 1.0) * max_gripper_opening
-    env_action[..., 13] = np.clip(action[..., 13], 0.0, 1.0) * max_gripper_opening
+    env_action[..., 12] = np.clip(np.clip(action[..., 6], 0.0, 1.0) * model_gripper_scale, 0.0, max_gripper_opening)
+    env_action[..., 13] = np.clip(np.clip(action[..., 13], 0.0, 1.0) * model_gripper_scale, 0.0, max_gripper_opening)
     return env_action
 
 
@@ -122,7 +130,11 @@ class PiperActionFilter:
 
     def to_env_action(self, action: np.ndarray) -> np.ndarray:
         if self.action_format == "model":
-            return model_action_to_env_action(action, max_gripper_opening=self.config.max_gripper_opening)
+            return model_action_to_env_action(
+                action,
+                model_gripper_scale=self.config.model_gripper_scale,
+                max_gripper_opening=self.config.max_gripper_opening,
+            )
         return clamp_env_grippers(action, max_gripper_opening=self.config.max_gripper_opening)
 
     def _initial_action_from_obs(self, obs: Any, *, env_id: int) -> np.ndarray:

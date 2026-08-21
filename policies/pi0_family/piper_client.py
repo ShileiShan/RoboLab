@@ -35,6 +35,7 @@ class Pi0PiperDualArmClient(InferenceClient):
         "pi05": 15,
     }
     FALLBACK_HORIZON: int = 15
+    GRIPPER_OUTPUT_SCALE: float = 0.035
     MAX_GRIPPER_OPENING: float = 0.035
 
     def __init__(
@@ -148,8 +149,16 @@ class Pi0PiperDualArmClient(InferenceClient):
         env_chunk = np.empty_like(chunk)
         env_chunk[..., 0:6] = chunk[..., 0:6]
         env_chunk[..., 6:12] = chunk[..., 7:13]
-        env_chunk[..., 12] = np.clip(chunk[..., 6], 0.0, 1.0) * self.MAX_GRIPPER_OPENING
-        env_chunk[..., 13] = np.clip(chunk[..., 13], 0.0, 1.0) * self.MAX_GRIPPER_OPENING
+        env_chunk[..., 12] = np.clip(
+            np.clip(chunk[..., 6], 0.0, 1.0) * self.GRIPPER_OUTPUT_SCALE,
+            0.0,
+            self.MAX_GRIPPER_OPENING,
+        )
+        env_chunk[..., 13] = np.clip(
+            np.clip(chunk[..., 13], 0.0, 1.0) * self.GRIPPER_OUTPUT_SCALE,
+            0.0,
+            self.MAX_GRIPPER_OPENING,
+        )
         return env_chunk
 
     @staticmethod
@@ -222,13 +231,13 @@ class Pi0RTCPiperDualArmClient(Pi0PiperDualArmClient):
 
     DEFAULT_CONTROL_HZ: float = 30.0
     DEFAULT_EXECUTION_HORIZON: int = 10
-    DEFAULT_INFERENCE_DELAY_STEPS: int = 2
+    DEFAULT_INFERENCE_DELAY_STEPS: int = 1
     MODEL_ACTION_DIM: int = 32
 
     def __init__(
         self,
         remote_host: str = "localhost",
-        remote_port: int = 8001,
+        remote_port: int = 8003,
         remote_uri: str | None = None,
         control_hz: float = DEFAULT_CONTROL_HZ,
         execution_horizon: int = DEFAULT_EXECUTION_HORIZON,
