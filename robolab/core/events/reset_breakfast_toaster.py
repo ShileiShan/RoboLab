@@ -6,9 +6,8 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-import numpy as np
 import torch
-from pxr import Gf, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Usd, UsdPhysics
 
 from robolab.constants import SCENE_DIR
 from robolab.core.scenes.utils import find_scene_file
@@ -20,39 +19,6 @@ _JOINT_STATE_CHANNELS = {
     "PhysicsPrismaticJoint": "linear",
     "PhysicsRevoluteJoint": "angular",
 }
-
-
-def _extract_world_pose_wxyz(
-    prim: Usd.Prim,
-    xform_cache: UsdGeom.XformCache,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return world position + quaternion (wxyz) for a composed USD prim."""
-    world_xform = xform_cache.GetLocalToWorldTransform(prim)
-    pos = np.array(world_xform.ExtractTranslation(), dtype=np.float32)
-
-    rot_mat = world_xform.ExtractRotationMatrix()
-    col0 = Gf.Vec3d(rot_mat[0][0], rot_mat[1][0], rot_mat[2][0])
-    col1 = Gf.Vec3d(rot_mat[0][1], rot_mat[1][1], rot_mat[2][1])
-    col2 = Gf.Vec3d(rot_mat[0][2], rot_mat[1][2], rot_mat[2][2])
-    sx, sy, sz = col0.GetLength(), col1.GetLength(), col2.GetLength()
-    if sx > 1e-9 and sy > 1e-9 and sz > 1e-9:
-        norm_mat = Gf.Matrix3d(
-            col0[0] / sx,
-            col1[0] / sy,
-            col2[0] / sz,
-            col0[1] / sx,
-            col1[1] / sy,
-            col2[1] / sz,
-            col0[2] / sx,
-            col1[2] / sy,
-            col2[2] / sz,
-        )
-        quat = norm_mat.ExtractRotation().GetQuat()
-    else:
-        quat = Gf.Quatd(1.0, 0.0, 0.0, 0.0)
-
-    orient = np.array([quat.GetReal(), *quat.GetImaginary()], dtype=np.float32)
-    return pos, orient
 
 
 def _get_float_attr(prim: Usd.Prim, attr_name: str) -> float | None:
@@ -70,6 +36,16 @@ def _first_not_none(*values: float | None) -> float:
         if value is not None:
             return float(value)
     return 0.0
+
+
+def _get_vec3_attr(prim: Usd.Prim, attr_name: str) -> tuple[float, float, float] | None:
+    attr = prim.GetAttribute(attr_name)
+    if not attr or not attr.IsValid():
+        return None
+    value = attr.Get()
+    if value is None:
+        return None
+    return tuple(float(component) for component in value)
 
 
 def _get_applied_drive_names(prim: Usd.Prim) -> tuple[str, ...]:
@@ -114,20 +90,29 @@ def _extract_joint_defaults(prim: Usd.Prim, root_prim: Usd.Prim) -> dict:
     }
 
 
-def _extract_root_xform_defaults(root_prim: Usd.Prim) -> tuple[tuple[str, object], ...]:
+def _extract_xform_defaults(prim: Usd.Prim) -> tuple[tuple[str, object], ...]:
     xform_defaults: list[tuple[str, object]] = []
 
-    xform_op_order_attr = root_prim.GetAttribute("xformOpOrder")
+    xform_op_order_attr = prim.GetAttribute("xformOpOrder")
     if xform_op_order_attr and xform_op_order_attr.IsValid():
         xform_defaults.append(("xformOpOrder", xform_op_order_attr.Get()))
 
-    for attr in root_prim.GetAttributes():
+    for attr in prim.GetAttributes():
         name = attr.GetName()
         if not name.startswith("xformOp:") or name == "xformOpOrder":
             continue
         xform_defaults.append((name, attr.Get()))
 
     return tuple(xform_defaults)
+
+
+def _extract_rigid_body_defaults(prim: Usd.Prim, root_prim: Usd.Prim) -> dict:
+    return {
+        "suffix": str(prim.GetPath()).removeprefix(str(root_prim.GetPath())),
+        "xform": _extract_xform_defaults(prim),
+        "linear_velocity": _get_vec3_attr(prim, "physics:velocity"),
+        "angular_velocity": _get_vec3_attr(prim, "physics:angularVelocity"),
+    }
 
 
 @lru_cache(maxsize=1)
@@ -142,13 +127,10 @@ def _load_jointed_asset_defaults() -> dict[str, dict]:
     if not world_prim.IsValid():
         raise ValueError(f"Could not find {_SCENE_ROOT_PATH} in {scene_path!s}.")
 
-    xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
     asset_defaults: dict[str, dict] = {}
 
     for root_prim in world_prim.GetChildren():
-        rigid_suffixes: list[str] = []
-        rigid_positions: list[np.ndarray] = []
-        rigid_orientations: list[np.ndarray] = []
+        rigid_bodies: list[dict] = []
         joints: list[dict] = []
 
         for prim in Usd.PrimRange(root_prim):
@@ -158,60 +140,18 @@ def _load_jointed_asset_defaults() -> dict[str, dict]:
 
             rigid_body_api = UsdPhysics.RigidBodyAPI(prim)
             if rigid_body_api and rigid_body_api.GetRigidBodyEnabledAttr().Get():
-                suffix = str(prim.GetPath()).removeprefix(str(root_prim.GetPath()))
-                pos, orient = _extract_world_pose_wxyz(prim, xform_cache)
-                rigid_suffixes.append(suffix)
-                rigid_positions.append(pos)
-                rigid_orientations.append(orient)
+                rigid_bodies.append(_extract_rigid_body_defaults(prim, root_prim))
 
         if not joints:
             continue
 
         asset_defaults[root_prim.GetName()] = {
-            "root_xform": _extract_root_xform_defaults(root_prim),
-            "rigid_suffixes": tuple(rigid_suffixes),
-            "rigid_positions": np.stack(rigid_positions, axis=0),
-            "rigid_orientations": np.stack(rigid_orientations, axis=0),
+            "root_xform": _extract_xform_defaults(root_prim),
+            "rigid_bodies": tuple(rigid_bodies),
             "joints": tuple(joints),
         }
 
     return asset_defaults
-
-
-def _ensure_runtime_views(env) -> None:
-    if hasattr(env, "_breakfast_jointed_asset_reset_views"):
-        return
-
-    try:
-        from isaacsim.core.prims import RigidPrim
-
-        def _make_rigid_view(paths: list[str]):
-            return RigidPrim(paths, reset_xform_properties=False)
-
-    except ImportError:
-        from isaacsim.core.experimental.prims import RigidPrim
-
-        def _make_rigid_view(paths: list[str]):
-            return RigidPrim(paths, resolve_paths=False)
-
-    defaults_by_asset = _load_jointed_asset_defaults()
-    asset_views: dict[str, dict] = {}
-    for asset_name, defaults in defaults_by_asset.items():
-        root_paths = [
-            f"/World/envs/env_{env_id}/scene/{asset_name}"
-            for env_id in range(env.num_envs)
-        ]
-        rigid_paths = [
-            f"{root_path}{suffix}"
-            for root_path in root_paths
-            for suffix in defaults["rigid_suffixes"]
-        ]
-        asset_views[asset_name] = {
-            "rigid": _make_rigid_view(rigid_paths),
-            "num_rigid_per_env": len(defaults["rigid_suffixes"]),
-        }
-
-    env._breakfast_jointed_asset_reset_views = asset_views
 
 
 def _set_runtime_joint_state(joint_prim: Usd.Prim, state_channel: str, position: float, velocity: float) -> None:
@@ -259,6 +199,15 @@ def _set_runtime_root_xform(root_prim: Usd.Prim, xform_defaults: tuple[tuple[str
         attr.Set(attr_value)
 
 
+def _set_runtime_vector_attr(prim: Usd.Prim, attr_name: str, value: tuple[float, float, float] | None) -> None:
+    if value is None:
+        return
+    attr = prim.GetAttribute(attr_name)
+    if not attr or not attr.IsValid():
+        return
+    attr.Set(Gf.Vec3f(*value))
+
+
 def reset_breakfast_scene_jointed_assets(env, env_ids: torch.Tensor) -> None:
     """Restore all breakfast scene assets with authored joints to their default state."""
     if env_ids is None:
@@ -270,52 +219,27 @@ def reset_breakfast_scene_jointed_assets(env, env_ids: torch.Tensor) -> None:
     if not defaults_by_asset:
         return
 
-    _ensure_runtime_views(env)
     import omni.usd
 
     stage = omni.usd.get_context().get_stage()
-    env_ids = env_ids.to(dtype=torch.long, device=env.scene.device)
-    env_ids_cpu = env_ids.detach().cpu().tolist()
-    env_origins = env.scene.env_origins[env_ids].detach().to(dtype=torch.float32)
+    env_ids_cpu = env_ids.to(dtype=torch.long, device=env.scene.device).detach().cpu().tolist()
 
     for asset_name, defaults in defaults_by_asset.items():
-        views = env._breakfast_jointed_asset_reset_views[asset_name]
         for env_id in env_ids_cpu:
             runtime_root = stage.GetPrimAtPath(f"/World/envs/env_{env_id}/scene/{asset_name}")
             if runtime_root.IsValid():
                 _set_runtime_root_xform(runtime_root, defaults["root_xform"])
-
-        num_rigid = views["num_rigid_per_env"]
-        rigid_positions_default = torch.as_tensor(
-            defaults["rigid_positions"], dtype=torch.float32, device=env.scene.device
-        )
-        rigid_orientations_default = torch.as_tensor(
-            defaults["rigid_orientations"], dtype=torch.float32, device=env.scene.device
-        )
-        rigid_positions = torch.cat(
-            [rigid_positions_default + origin.unsqueeze(0) for origin in env_origins],
-            dim=0,
-        )
-        rigid_orientations = rigid_orientations_default.repeat(len(env_ids_cpu), 1)
-        rigid_indices = torch.as_tensor(
-            [
-                env_id * num_rigid + rigid_idx
-                for env_id in env_ids_cpu
-                for rigid_idx in range(num_rigid)
-            ],
-            dtype=torch.long,
-            device=env.scene.device,
-        )
-        zero_velocities = torch.zeros((rigid_indices.numel(), 6), dtype=torch.float32, device=env.scene.device)
-        views["rigid"].set_world_poses(
-            positions=rigid_positions,
-            orientations=rigid_orientations,
-            indices=rigid_indices,
-        )
-        views["rigid"].set_velocities(
-            velocities=zero_velocities,
-            indices=rigid_indices,
-        )
+                for rigid_body_defaults in defaults["rigid_bodies"]:
+                    rigid_prim = stage.GetPrimAtPath(str(runtime_root.GetPath()) + rigid_body_defaults["suffix"])
+                    if not rigid_prim.IsValid():
+                        continue
+                    _set_runtime_root_xform(rigid_prim, rigid_body_defaults["xform"])
+                    _set_runtime_vector_attr(
+                        rigid_prim, "physics:velocity", rigid_body_defaults["linear_velocity"]
+                    )
+                    _set_runtime_vector_attr(
+                        rigid_prim, "physics:angularVelocity", rigid_body_defaults["angular_velocity"]
+                    )
 
         for env_id in env_ids_cpu:
             runtime_root = f"/World/envs/env_{env_id}/scene/{asset_name}"
