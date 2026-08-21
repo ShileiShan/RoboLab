@@ -230,6 +230,7 @@ def run_episode(
 
     robot_semantic_ids: set[int] | None = None
     breakfast_object_semantic_ids: set[int] | None = None
+    warned_missing_viewport_frame = False
 
     def semantic_labels_describe_robot(labels) -> bool:
         """Accept Isaac Replicator's version-dependent semantic label forms."""
@@ -311,6 +312,7 @@ def run_episode(
 
     def write_video_frames(frame_obs, *, skip_frozen: bool = False) -> None:
         """Append a synchronized frame to each enabled per-env video stream."""
+        nonlocal warned_missing_viewport_frame
         if not save_videos:
             return
         for env_id in range(env.num_envs):
@@ -326,7 +328,15 @@ def run_episode(
                 video_writers_obs[env_id].write(sensor_frame)
             if save_viewport:
                 viewport_frame = unpack_viewport_cams(frame_obs, env_id=env_id).get("combined_image")
-                video_writers_viewport[env_id].write(viewport_frame)
+                if viewport_frame is None:
+                    if not warned_missing_viewport_frame:
+                        print(
+                            "[RoboLab] viewport video requested but no viewport camera frames were produced; "
+                            "skipping empty viewport writes."
+                        )
+                        warned_missing_viewport_frame = True
+                else:
+                    video_writers_viewport[env_id].write(viewport_frame)
             if write_robot_masks:
                 video_writers_robot_mask[env_id].write(robot_mask_from_frame(frame_obs, env_id))
             if write_breakfast_objects_masks:

@@ -225,6 +225,8 @@ def unpack_viewport_cams(obs, obs_group_name="viewport_cam", camera_suffix=["_ca
 
     images = []
     viewport_dict = {}
+    if obs_group_name not in obs:
+        return viewport_dict
     for key, value in obs[obs_group_name].items():
         if any(key.endswith(suffix) for suffix in camera_suffix):
             tensor = value[env_id].detach()
@@ -241,6 +243,6 @@ def unpack_viewport_cams(obs, obs_group_name="viewport_cam", camera_suffix=["_ca
             image = tensor.cpu().numpy()
             viewport_dict[key] = image
             images.append(image)
-    combined_image = np.concatenate(images, axis=1)
-    viewport_dict["combined_image"] = combined_image
+    if images:
+        viewport_dict["combined_image"] = np.concatenate(images, axis=1)
     return viewport_dict

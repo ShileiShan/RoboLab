@@ -256,7 +256,7 @@ function fmtScoreCell(mean, std, n, opts = {}) {
 // Default speed for every <video> rendered by the dashboard. playbackRate is a
 // JS property (not an HTML attribute) and some browsers reset it on certain
 // transitions, so we set it eagerly AND re-apply on loadedmetadata + play.
-const DEFAULT_VIDEO_RATE = 2.0;
+const DEFAULT_VIDEO_RATE = 1.0;
 function applyDefaultPlaybackRate(video) {
   video.playbackRate = DEFAULT_VIDEO_RATE;
   const reapply = () => { video.playbackRate = DEFAULT_VIDEO_RATE; };
